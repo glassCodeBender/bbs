@@ -1,0 +1,1140 @@
+package com.bbs.vol.windows
+
+/**
+  * Main Class: ProcessDiscoveryWindows
+  * Purpose: Examine each process in detail and find out as much as possible about it.
+  *
+  * Also in File:
+  * AutomateYara object
+  * DetectRegPersistence object
+  * DetectUnlinkedDLLs object
+  */
+
+import com.bigbrainsecurity.utils.nlp.StringOperations._
+
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+import sys.process._
+import scala.io.Source
+import scala.util.Try
+
+/** This is the class that run() will return. Obviously the types need to be changed. */
+/** MUST RETURN
+  * malfind
+  * yaraScan
+  * parents
+  * dllInfo
+  * ldrInfo
+  * regPersistenceInfo
+  * enabledPrivs
+  */
+final case class ProcessBrain( yara: YaraBrain,
+                               regPersistence: Vector[RegPersistenceInfo],
+                               dllInfo: Vector[DllInfo],
+                               ldrInfo: Vector[LdrInfo],
+                               // fileDiscrep: String,
+                               // parents: Vector[(String, Vector[(String, String)])],
+                               privs: Vector[Privileges],
+                               malfind: Map[String, String],
+                               netActivity: Map[String, Boolean] ) // Map of PID -> (whether or not proc does networking)
+
+/** Stores pertinent information parsed from yarascan */
+final case class YaraParse( classification: String, // What list did rule come from?
+                            rule: String,           // What rule was matched?
+                            owner: String,          // Which PID and process was matched?
+                            offset: String ) {      // Where in memory was the match found?
+  override def toString( ): String = {
+    "\nClassification: " + classification + "\nRule: " + rule + "\n" + owner + "\nOffset: " + offset + "\n"
+  } // END toString()
+
+} // END case class YaraParse
+
+final case class YaraBrain( url: Vector[YaraParseString],     // URLs present in process memory.
+                            ip: Vector[YaraParseString],      // IPs present in process memory.
+                            malware: Vector[YaraParseString], // Malware indicators found in process memory.
+                            suspItems: YaraSuspicious,        // antidebug, exploitkits, webshells, cve,
+                                                              // malicious documents, suspicious strings.
+                            crypto: Vector[YaraParse],        // Cryptography signatures found in process memory.
+                            dllInHexRange: Vector[ArrayBuffer[(String, Int)]] )
+
+final case class DllHexInfo(pid: String, dllName: String, lowHex: Int, highHex: Int){
+  override def toString = "pid: " + pid + " dll name: " + dllName + " low hex: " + lowHex + " high hex: " + highHex
+} // END case class DLLHexInof
+
+/** Case class used if we want to include data found in String column of yarascan. */
+final case class YaraParseString(rule: String, proc: String, str: String) {
+  override def toString = "\nRule: " + rule + "\n" + proc + "\nData Found:" + str + "\n"
+} // END case class YaraParseString
+
+/** Stores information we find out about the privileges each PID has. */
+case class Privileges( pid: String,
+                       debugPriv: Boolean,
+                       enabledPrivs: ArrayBuffer[String],
+                       suspiciousPrivs: ArrayBuffer[String] ){
+  override def toString: String = {
+    "PID: " + pid + "\nDebug Enabled: " + debugPriv + "\nEnabled: " + enabledPrivs.mkString + "\nSuspicious: " + suspiciousPrivs.mkString
+  }
+}
+
+/**
+  * IDEA: CLASSIFY each process after examination.
+  * For Example: Is the process involved in network activity and what kind of activity?
+  * One was to determine this is by looking at the types of DLLs that are linked to the process.
+  *
+  * EXTENDED IDEA: CLASSIFY normal processes
+  * For Example: A lot of processes shouldn't be involved with network activity.
+  * Generate a list of processes that shouldn't be doing certain things.
+  */
+
+class ProcessDiscoveryWindows( os: String,
+                               memFile: String,
+                               process: Vector[ProcessBbs],         // Info from original
+                               netConn: Vector[NetConnections]
+                  //yaraMap: Map[String, String] // SKIPPED Info from config file about how detailed scan should be.
+                             ) extends VolParse {
+
+  def run: ProcessBrain = {
+
+    /** A vector made up of all the pids */
+    val pidVec: Vector[String] = process.map(x => x.pid).distinct
+
+    /** Determine all parents that a process inherits from. */
+    // val parents: Vector[(String, Vector[(String, String)])] = for(pid <- pidVec) yield getParents(pid, process)
+
+    // val test: Vector[Vector[(String, String)]] = for(parent<- parents) yield parent._2
+
+
+
+    /* Test if the logic works. */
+    /*
+    println("\n\nPrint Parents")
+    for{
+      value <- test
+      result <- value
+    } println( "\n\nPID: " + result._2 + "\nParents: " + result._2)
+*/
+    println("\n\nScanning to determine is an attacker established registry persistence...\n\n")
+    /** Used to detect registry persistence. Contains Strings from the individual scans pg. 183*/
+    val regPersistenceInfo: Vector[RegPersistenceInfo] = {
+      for(pid <- pidVec) yield DetectRegPersistence.run(memFile, os, pid)
+    } // END regPersistenceInfo
+    println("\n\nPrint registry persistence info: \n\n")
+    regPersistenceInfo.foreach(println)
+
+    println("\n\nScanning to determine process networking capabilities...\n\n")
+    /** Determine if a pid has networking capability. */
+    val netPidMap: Map[String, Boolean] = examineNetActivity(memFile, os, pidVec)
+
+    println("\n\nPrinting information about pid's networking capability...\n\n")
+    for((key, bool) <- netPidMap) println(key + "->" + bool )
+
+    println("\n\nScanning to determine enabled privileges...\n\n")
+    /** Only gives privileges that a process specifically enabled. */
+    val enabledPrivs: Vector[Privileges] = for (pid <- pidVec) yield findEnabledPrivs(memFile, os, pid)
+    enabledPrivs.foreach(println)
+
+    println("\n\nScanning for DLL info...\n\n")
+
+    /** Need to reorganize the data */
+    val (dllInfo, ldrInfo): (Vector[DllInfo], Vector[LdrInfo]) = DllScan.run(os, memFile, pidVec)
+    println("\n\nPrint DLL Info: \n\n")
+    dllInfo.foreach(println)
+    println("\n\nPrint LDR Info: \n\n")
+    ldrInfo.foreach(println)
+
+    /**
+      * NEED TO PASS Vector[DllInfo] to yarascan
+      */
+
+    /** Perform all yarascans*/
+      println("\n\nScanning memory with yara...\n\n")
+    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, process, netConn, dllInfo)
+
+    /** Perform malfind scan*/
+      println("\n\nPerforming malfind scan...\n\n")
+    val malfind: Map[String, String] = malfindScan(memFile, os, pidVec)
+
+    println("\n\nPrinting malfind results...\n\n")
+    for((key, scan) <- malfind)println(key + "\n" + scan)
+
+/**
+  * Looks for artifacts of network sockets that the process created.
+  * Currently this method returns the entire scan result if network artifacts are found.
+  * Method might be unnecessary
+  */
+    return ProcessBrain(yaraScan, regPersistenceInfo, dllInfo, ldrInfo, enabledPrivs, malfind, netPidMap )
+  } // END run()
+
+  /**********************************************************************/
+  /****************************** END RUN *******************************/
+  /**********************************************************************/
+
+  /**
+    * HELPER METHODS
+    */
+
+  /**
+    * getParents()
+    * Figure out who all the parents of a process are.
+    * Return tuple (pid -> Vector[(ppid, process name)])
+    * I know I should use recursion, but I'm lazy.
+    */
+  def getParents(pid: String, pids: Vector[ProcessBbs]): (String, Vector[(String, String)]) = {
+    /** Returns the ppid of pid as the first value in Vector */
+    val directParent = for {
+      pidVal <- pids
+      if pidVal.ppid.nonEmpty
+      if pidVal.pid == pid
+    } yield (pidVal.ppid, pidVal.name)
+    val parentParent = for{
+      pidVal <- pids
+      if directParent.nonEmpty
+      if pidVal.pid == directParent(0)._1
+    } yield (pidVal.ppid, pidVal.name)
+    val parent3 = for{
+      pidVal <- pids
+      if parentParent.nonEmpty
+      if pidVal.pid == parentParent(0)._1
+    } yield (pidVal.ppid, pidVal.name)
+    val parent4 = for{
+      pidVal <- pids
+      if parent3.nonEmpty
+      if pidVal.pid == parent3(0)._1
+    } yield (pidVal.ppid, pidVal.name)
+    val parent5 = for{
+      pidVal <- pids
+      if parent4.nonEmpty
+      if pidVal.pid == parent4(0)._1
+    } yield (pidVal.ppid, pidVal.name)
+    val parent6 = for{
+      pidVal <- pids
+      if parent5.nonEmpty
+      if pidVal.pid == parent5(0)._1
+    } yield (pidVal.ppid, pidVal.name)
+    val parent7 = for{
+      pidVal <- pids
+      if parent5.nonEmpty
+      if pidVal.pid == parent6(0)._1
+    } yield (pidVal.ppid, pidVal.name)
+
+    var buff = ArrayBuffer[(String, String)]()
+
+    /** if a parent exists, add it to the ArrayBuffer */
+    if(directParent.nonEmpty) buff ++= directParent
+    if(parentParent.nonEmpty) buff ++= parentParent
+    if(parent3.nonEmpty) buff ++= parent3
+    if(parent4.nonEmpty) buff ++= parent4
+    if(parent5.nonEmpty) buff ++= parent5
+    if(parent6.nonEmpty) buff ++= parent6
+    if(parent7.nonEmpty) buff ++= parent7
+
+    return (pid, buff.toVector)
+  } // END getParents()
+
+  /** Scan with malfind for all processes. */
+  def malfindScan(memFile: String, os: String, pids: Vector[String]): Map[String, String] = {
+    val resultVec: Vector[(String, String)] = for(pid <- pids) yield malfindPerPid(memFile, os, pid)
+    return resultVec.toMap
+  } // END malfind()
+
+  /** Scan with malfind for each individual process. */
+  def malfindPerPid(memFile: String, os: String, pid: String): (String, String) = {
+    val malScan = Some( s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim)
+    return (pid, malScan.getOrElse(""))
+  } // END malfindPerPid()
+
+  /** Determines which PIDs do networking. */
+  def examineNetActivity(memFile: String, os: String, pids: Vector[String]): Map[String, Boolean] = {
+    val resultVec: Vector[(String, Boolean)] = for(pid <- pids) yield netPerPid(memFile, os, pid)
+    val result: Map[String, Boolean] = resultVec.toMap
+    return result
+  } // END examineNetActivity()
+
+  /** Determines if an individual PID does networking */
+  def netPerPid(memFile: String, os: String, pid: String): (String, Boolean) = {
+    val networkActivity = Some( s"python vol.py -f $memFile --profile=$os handles -p $pid -t File")
+    val parsed = parseOutputNoHeader(networkActivity.getOrElse("").toLowerCase)
+    val endBool = parsed.exists(x => x.contains("afd\\endpoint"))
+    return (pid, endBool)
+  } // END netPerPid()
+
+  /**
+    * fileNameDiscrepancies()
+    * Looks for artifacts of network sockets that the process created.
+    * Currently this method returns the entire scan result if network artifacts are found.
+    * @param memFile
+    * @param os
+    * @param pid
+    * @return Vector[String]
+    */
+  def fileNameDiscrepancies(memFile: String, os: String, pid: String): Vector[String] = {
+
+    /** Make sure the filenames in the details and the filenames for each process match (182) */
+    val fileNameDiscrepancies: Option[String] = {
+      Some( s"python vol.py -f $memFile --profile=$os -p $pid handles -t File, Mutant --silent".!!.trim )
+    }
+    val pattern = "(NamedPipe|Tcp|Ip)".r
+    val parsedDiscrepancies = parseOutputDashVec(fileNameDiscrepancies.getOrElse(""))
+    val lookForDiscrepancies = {
+      parsedDiscrepancies.getOrElse(Vector[String]())
+        .map(x => pattern.findFirstIn(x).getOrElse("where's the line?") != "where's the line?")
+    }
+
+    // Look for named "NamedPipe", "\Device\Tcp", and "\Device\Ip"
+    // If there are occurrences, we should print full result.
+    // See page 182-183 for more info.
+    // Doing a thorough analysis of handles will require a lot of research.
+    // NOTE: It might be useful to consider the size of the handle count.
+
+    if(lookForDiscrepancies.nonEmpty){
+      return parsedDiscrepancies.getOrElse(Vector[String]())
+    }else {
+      return Vector[String]()
+    } // END if/else
+
+  } // END fileNameDiscrepancies()
+
+  /**
+    * findEnabledPrivs()
+    * Looks for suspicious privileges that a process enabled.
+    * When the results of this print, tell the user to compare the privs ot process explorer.
+    * @param memFile
+    * @param os
+    * @param pid
+    * @return (ArrayBuffer of all privs enabled, ArrayBuffer of suspicious privs enabled)
+    */
+  def findEnabledPrivs(memFile: String, os: String, pid: String): Privileges ={
+
+    // Need to research more privileges to add to this list.
+
+    /** Contains Vector of privileges that could be significant if enabled.*/
+    val significantPrivs: Vector[String] = Vector( "SeDebugPrivilege", "SeLoadDrivePrivilege", "SeBackupPrivilege",
+      "SeLoadDriverPrivilege", "SeChangeNotifyPrivilege", "SeShutdownPrivilege" )
+
+    // There are a lot of other privileges that should probably be added to the list.
+
+    /** Allows us to determine which privilege the process enabled (list on 171-172) */
+    val privsScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os privs -p $pid".!!.trim )
+
+    /** Only gives privileges that a process specifically enabled by process. */
+    val privs: Option[Vector[String]] = parseOutputDashVec( privsScan.getOrElse("") )
+      .filter( _.contains("Enabled") )
+      .filterNot( _.contains("Default") )
+
+    /** Figure out if SeDebugPrivilege is enabled and store in tuple w/ PID */
+    val debugEnabled: Vector[Boolean] = Some({
+      privs.getOrElse(Vector[String]())
+        .map( _.toUpperCase() )
+        .map( x => x.contains("SEDEBUGPRIVILEGE") )
+        }).getOrElse(Vector[Boolean]())
+
+    val debugBool = if(debugEnabled.isEmpty) false else true
+
+    /** This could be replaced by lookahead regex */
+    val privsWithColumns: Vector[Vector[String]] = {
+      vecParse( privs.getOrElse( Vector[String]()) ).getOrElse( Vector[Vector[String]]() )
+    }
+    // val privsWithColumns: Vector[Vector[String]] = vecParse( privsParse ).getOrElse(Vector[Vector[String]]())
+
+    /** Creates an ArrayBuffer of the privileges the process created */
+    val enabledPrivsBuff = ArrayBuffer[Option[String]]()
+    var i = 0
+    // might need to use (privsWithColumns.length - 1) hopefully trim will fix it.
+    while(i < privsWithColumns.length) {
+      enabledPrivsBuff += Some(privsWithColumns(i)(4))
+      i += 1
+    } // END while
+
+    val enabledPrivs = enabledPrivsBuff.map(x => x.getOrElse(""))
+
+    /** If any suspicious privileges were enabled by a process, they are stored in this ArrayBuffer */
+    val suspiciousPrivs: ArrayBuffer[String] = {
+      enabledPrivs.filter(x => significantPrivs.exists(y => x.contains(y)))
+    }
+
+    // Need another methods that looks for privs based on the executable
+    // Example: Look for SeDebugPrivilege and SeLoadDriverPrivilege in explorer.exe
+    // We can get a list of correct privs enabled by different processes by parsing output on clean system.
+
+    /** NOTE: We don't really need to use the command below, but might be easier than manually parsing.
+      * Count the times that Enabled occurs.
+      * IGNORE UNDOCK PRIV: explorer.exe always enables undock priv. */
+
+    return Privileges(pid, debugBool, enabledPrivs, suspiciousPrivs)
+  } // END findEnabledPrivs()
+
+} // END ProcessDiscoveryWindows class
+
+/**
+  * YaraSuspicious
+  * Description: Encapsulates a variety of Yara Scans.
+  * THIS IS THE CLASS AutomateYara Returns
+  */
+final case class YaraSuspicious(packers: Vector[YaraParse],
+                                antidebug: Vector[YaraParse],
+                                exploitKits: Vector[YaraParse],
+                                webshells: Vector[YaraParse],
+                                cve: Vector[YaraParse],
+                                malDocs: Vector[YaraParse],
+                                suspStrings: Vector[YaraParseString]){
+  override def toString(): String = {
+    "\n\nPackers:\n" +
+      packers.mkString("\n") +
+      "\n\nAnti-Debug:\n" +
+      antidebug.mkString("\n") +
+      "\n\nExploit Kits:\n" +
+      exploitKits.mkString("\n") +
+      "\n\nWebshells:\n" +
+      webshells.mkString("\n") +
+      "\n\nCVEs:\n" +
+      cve.mkString("\n") +
+      "\n\nMalicious Documents:\n" +
+      malDocs.mkString("\n") +
+      "\n\nSuspicious Strings:\n" +
+      suspStrings.mkString("\n")
+  } // END toString()
+} // END YaraSuspicious case class
+
+/****************************************************************************************************/
+/****************************************************************************************************/
+/**************************************** AutomateYara Object ***************************************/
+/****************************************************************************************************/
+/****************************************************************************************************/
+
+object AutomateYara extends VolParse {
+  def run( os: String,
+           memFile: String,
+           process: Vector[ProcessBbs],
+           net: Vector[NetConnections],
+           dllInfo: Vector[DllInfo] ): YaraBrain = {
+
+    val allDllInfo: Vector[Vector[DllHexInfo]] = for(dll <- dllInfo) yield dll.memRange
+
+    println("\n\nScanning memory with yara...\n\n")
+
+    // (pid, destination IP)
+    val netOutgoing: Vector[(String, String)] = net.filter( _.destLocal == false ).map(x => (x.pid, x.destIP))
+    val pids: Vector[String] = process.map(x => x.pid)
+    val netPids = netOutgoing.map(_._1)
+
+    /** Filter dllInfo so it only contains processes w/ outgoing connections. */
+    val locateDll: Vector[Vector[DllHexInfo]] = for{
+      dllInfo <- allDllInfo
+      if dllInfo.exists(x => netPids.contains(x))
+    } yield dllInfo
+
+    // (pid -> Pertinent yara info )
+    val ipCheck: Vector[(String, Vector[YaraParse])] = {
+      runIp(memFile, os, netOutgoing, pids)
+    } // END ipCheck
+
+    /**
+      * NEED TO TEST!!!
+      */
+
+    /** Vector of Array that contains offsets */
+    val ipOffset: Vector[Vector[Int]] = ipCheck.map(x => x._2.map(y => hex2Int(y.offset)))
+
+    for{
+      value <- ipOffset
+      result <- value
+    } println("Offset: " + result)
+
+    /** I highly doubt this works. */
+    val searchHex: Vector[ArrayBuffer[(String, Int)]] = for {
+      eachDll <- locateDll
+      value <- ipOffset
+    } yield searchHexRange(eachDll, value)
+
+    for{ value <- searchHex
+         result <- value } println(result._1 + " " + result._2 )
+    // searchHexRange.foreach(println)
+
+    println("\n\nScanning for URLs with yara...\n\n")
+    val urls: Vector[YaraParseString] = findUrls(memFile, os)
+
+    println("\n\nScanning for packers with yara...\n\n")
+    val packers: Vector[YaraParse] = findPackers(memFile, os)
+
+    println("\n\nScanning for anti-debug signatures with yara...\n\n")
+    val antidebug: Vector[YaraParse] = findAntiDebug(memFile, os)
+
+    println("\n\nScanning for exploit kits with yara...\n\n")
+    val exploitKits: Vector[YaraParse] = findExploitKits(memFile, os)
+
+    println("\n\nScanning for malicious documents with yara...\n\n")
+    val malDocs: Vector[YaraParse] = findMalDocs(memFile, os)
+
+    println("\n\nScanning for webshells with yara...\n\n")
+    val webshells: Vector[YaraParse] = findWebshells(memFile, os)
+
+    println("\n\nScanning for known CVEs with yara...\n\n")
+    val cveFound: Vector[YaraParse] = findCVE(memFile, os)
+
+    println("\n\nScanning for IPs in processes with yara...\n\n")
+    val ipRule: Vector[YaraParseString] = findIpRule(memFile, os)
+
+    println("\n\nScanning for suspicious strings with yara...\n\n")
+    val suspString: Vector[YaraParseString] = findSuspStrings(memFile, os)
+
+    /** Output too verbose to be useful. Would need to scan specific PID. */
+    // val base64: Vector[YaraParseString]  = findBase64(memFile, os)
+
+    println("\n\nScanning for malware with yara...\n\n")
+    /** Malware Checks */
+    val mal1: Vector[YaraParseString] = checkForMal1(memFile, os)
+    val mal2: Vector[YaraParseString] = checkForMal2(memFile, os)
+    val mal3: Vector[YaraParseString]  = checkForMal3(memFile, os)
+    val mal4: Vector[YaraParseString]  = checkForMal4(memFile, os)
+
+    /** Concat all malware scans together. */
+    val concatMal: Vector[YaraParseString] = mal1 ++: mal2 ++: mal3 ++: mal4
+
+    /** Print results for malware scan */
+    println("\n\nPrinting findings from malware detection scan...\n\n")
+
+    concatMal.foreach(println)
+
+    /** There are so many scans that we had to encapsulate some of the scans in a different object. */
+    val lowHitScans: YaraSuspicious = {
+      YaraSuspicious(packers, antidebug, exploitKits, webshells, cveFound, malDocs, suspString)
+    }
+
+    println("\n\nScanning for cryptography in process memory...\n\nThis may take a while...\n\n")
+    val crypto: Vector[YaraParse] = findCrypto(memFile, os)
+
+    /** When this program is run main full program, this will be returned */
+    return YaraBrain(urls, ipRule, concatMal, lowHitScans, crypto, searchHex)
+
+  } // END run()
+
+  private[this] def runIp(memFile: String, os: String,  info: Vector[(String, String)], pids: Vector[String]) = {
+
+    val uniqInfo = info.distinct
+
+    val ipResult: Vector[(String, Vector[YaraParse])] = {
+      for(ip <- uniqInfo) yield findIps(memFile, os, ip._1, ip._2, pids)
+    }
+
+    ipResult
+  } // END runIp()
+/*
+  /** Find which DLLs contain memory locations that call to outgoing IP address. */
+  private[this] def locateDllForIp(memFile: String, os: String, pid: String): Vector[DllHexInfo] = {
+    val dllList = Some( s"python vol.py -f $memFile --profile=$os -p $pid dlllist".!!.trim )
+
+    val parsed: Option[Vector[String]] = parseOutputDashVec(dllList.getOrElse(""))
+
+    val parse2d: Option[Vector[Vector[String]]] = vecParse(parsed.getOrElse(Vector[String]()))
+    val pertinentInfo: Option[Vector[Vector[String]]] = {
+      parse2d.map(x => Vector(x(0), x(1), x(3)))
+    }
+    val parsedPertInfo = pertinentInfo.getOrElse(Vector[Vector[String]]())
+
+    val hexRange: Vector[DllHexInfo] = for {
+      line <- parsedPertInfo
+    } yield DllHexInfo(pid, line(2), hex2Int(line(0)), hex2Int(line(0)) + hex2Int(line(1)))
+
+    hexRange.foreach(println)
+
+    return hexRange
+  } // END locateDllForIp()
+*/
+  private[this] def hex2Int(hex: String): Int = {
+    Integer.parseInt(hex.drop(2), 16)
+    // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
+  }
+
+  /** Search hex ranges for DLLs inside them. */
+  private[this] def searchHexRange(dllHex: Vector[DllHexInfo], hexSearch: Vector[Int]): ArrayBuffer[(String, Int)] = {
+
+    var i = 0
+    var j = 0
+    var buff = ArrayBuffer[(String, Int)]()
+    while (i < dllHex.length){
+      j = 0
+      while(j < hexSearch.length){
+        if( dllHex(i).lowHex to dllHex(i).highHex contains hexSearch(j)){
+          val tup = (dllHex(i).dllName, hexSearch(j))
+          buff += tup
+        }
+
+        j = j + 1
+      }
+      i = i + 1
+    } // END while
+
+    for(value <- buff) println("Dll Name: " + value._1 + "\nOffset: " + value._2)
+
+    /*
+    val result: Array[(String, Int)] = for{
+      value <- hexSearch
+      hexInfo <- dllHex
+      if hexInfo.lowHex to hexInfo.highHex contains value
+    } yield (hexInfo.dllName, value)
+*/
+    return buff
+  } // END searchHexRange
+
+  /** Find IPs in processes */
+  private[this] def findIpRule(memFile: String, os: String): Vector[YaraParseString] = {
+    val ip = Try( s"python vol.py -f $memFile --profile=$os yarascan -y ip.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    parseYaraString(ip)
+
+  } // END findIpRule
+
+  /** Find suspicious string. */
+  private[this] def findSuspStrings(memFile: String, os: String): Vector[YaraParseString] = {
+    val suspStrings = Try( s"python vol.py -f $memFile --profile=$os yarascan -y suspicious_strings.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    parseYaraString(suspStrings)
+  } // END findSuspStrings()
+
+  /** Run scan to look for malware */
+  private[this] def checkForMal1(memFile: String, os: String): Vector[YaraParseString] = {
+    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule1.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    parseYaraString(mal)
+  } // END checkForMal1()
+
+  /** Run scan to look for malware */
+  private[this] def checkForMal2(memFile: String, os: String): Vector[YaraParseString] = {
+    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule2.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    parseYaraString(mal)
+  } // END checkForMal1()
+
+  /** Run scan to look for malware */
+  private[this] def checkForMal3(memFile: String, os: String): Vector[YaraParseString] = {
+    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    parseYaraString(mal)
+  } // END checkForMal1()
+
+  /** Run scan to look for malware */
+  private[this] def checkForMal4(memFile: String, os: String): Vector[YaraParseString] = {
+    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    parseYaraString(mal)
+  } // END checkForMal1()
+
+  /*
+    private[this] def findBase64(memFile: String, os: String): Vector[YaraParseString] = {
+      val base64 = Try( s"python vol.py -f $memFile --profile=$os yarascan -y base64.yar".!!.trim )
+        .getOrElse("Nothing found.")
+
+      println(base64)
+
+      parseYaraString(base64)
+
+    } // END findBase64()
+  */
+  /*
+    private[this] def findMalOperations(memFile: String, os: String): Vector[YaraParse] = {
+      val opBlockbuster = Try( s"python vol.py -f $memFile --profile=$os yarascan -y operation_blockbuster_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+
+      parseYaraResults(opBlockbuster, "Operation BlockBuster Malware")
+    } // END findMalOperations()
+    */
+
+  /** Find URLs in processes */
+  private[this] def findUrls(memFile: String, os: String): Vector[YaraParseString] = {
+    val urls = Try( s"python vol.py -f $memFile --profile=$os yarascan -y url.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    return parseYaraString(urls)
+  } // END findUrls()
+
+  /** Find type of crypto used in processes */
+  private[this] def findCrypto(memFile: String, os: String): Vector[YaraParse] = {
+
+    println("\n\nScanning memory for crypto signatures.\n\nThis may take a while...\n\n")
+    val cryptoSigs = Try( s"python vol.py -f $memFile --profile=$os yarascan -y crypto_signatures.yar".!!.trim )
+      .getOrElse("No crypto signatures found.")
+
+    val parseSigs = parseYaraResults(cryptoSigs, "Crypto Signatures").sortBy(_.owner)
+
+    return parseSigs
+  } // END findCrypto()
+
+  private[this] def findExploitKits(memFile: String, os: String): Vector[YaraParse] = {
+    val exploits = Try( s"python vol.py -f $memFile --profile=$os yarascan -y exploitkits_rule.yar".!!.trim )
+      .getOrElse("No exploit kits found.")
+
+    val parseExploits = parseYaraResults(exploits, "Exploit Kit Signatures").sortBy(_.owner)
+
+    return parseExploits
+  } // END findExploitKits()
+
+  /** Will search for an IP address in process memory */
+  private[this] def findIps(memFile: String, os: String, pid: String, ip: String, pids: Vector[String]): (String, Vector[YaraParse]) = {
+    var yaraByIp = ""
+
+    val ipNoPort = ip.splitLast(':')(0)
+
+    if (pids.contains(pid)){
+      println(s"finding IPs for $pid with $ipNoPort...\n\n")
+
+      yaraByIp = {
+        Try( s"python vol.py -f $memFile --profile=$os yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
+          .getOrElse(s"No results for $ipNoPort in $pid")
+      }
+    }
+    val yaraParsed: Vector[YaraParse] = parseYaraResults(yaraByIp, "IP")
+
+    return (pid, yaraParsed)
+    // Need to parse the results
+
+  } // END findIps()
+
+  private[this] def findMalDocs(memFile: String, os: String): Vector[YaraParse] = {
+
+    val malDocs = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=malicious_documents_rule.yar".!!.trim )
+      .getOrElse("Nothing found.")
+
+    val malDocsParsed = parseYaraResults(malDocs, "Malicious Documents").sortBy(_.owner)
+
+    return malDocsParsed
+  } // END findMalDocs()
+
+  private[this] def findWebshells(memFile: String, os: String): Vector[YaraParse] = {
+
+    val shells = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=webshell.yar".!!.trim )
+      .getOrElse("No possible webshells found.")
+
+    val shellsParsed = parseYaraResults(shells, "Webshells").sortBy(_.owner)
+
+    return shellsParsed
+  } // END findWebshells()
+
+  private[this] def findCVE(memFile: String, os: String): Vector[YaraParse] ={
+
+    val cve = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=cve_rules.yar".!!.trim )
+      .getOrElse("No CVE Signatures Found")
+
+    val cveParsed = parseYaraResults(cve, "CVE").sortBy(_.owner)
+
+    return cveParsed
+  } // END findCVE()
+
+  private[this] def findAntiDebug(memFile: String, os: String): Vector[YaraParse] = {
+
+    val antiDebug = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=antidebug_antivm.yar".!!.trim )
+      .getOrElse("Could not find anti-debug Signatures")
+
+    val debugParsed = parseYaraResults(antiDebug, "Anti-Debug").sortBy(_.owner)
+
+    return debugParsed
+  } // END findAntiDebug()
+
+  /** Searched for packers used to obfuscate code. */
+  private[this] def findPackers(memFile: String, os: String): Vector[YaraParse] = {
+
+    val packers = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=packers_rule.yar".!!.trim )
+      .getOrElse("Could not find packers")
+
+    val packersParsed = parseYaraResults(packers, "Packers").sortBy(_.owner)
+
+    return packersParsed
+  } // END findPackers()
+
+  /** Extract the most useful section of the yara scan so we can pretty print. */
+  private[this] def parseYaraResults(str: String, name: String): Vector[YaraParse] = {
+
+    val splitResults: Vector[String] = str.split("""Rule:""").toVector
+    val cleanerSplit = splitResults.filterNot(x => x.isEmpty)
+
+    val extraSplit: Vector[Vector[String]] = {
+      splitResults.map(x => Source.fromString(x).getLines.map(_.trim).filterNot(_.isEmpty).toVector)
+    }
+
+    val yar: Vector[YaraParse] = for{
+      line <- extraSplit
+      if line.length > 3
+    } yield YaraParse(name, line(0), line(1).replaceAll("Process", ""), line(2).split(' ')(0))
+
+    yar.foreach(println)
+
+    return yar
+  } // END parseYaraResults()
+
+  private[this] def parseYaraString(str: String): Vector[YaraParseString] = {
+    val splitResults: Vector[String] = str.split("""Rule:""").toVector
+
+    // Array of rows, with array of info.
+    val extraSplit: Vector[Vector[String]] = {
+      splitResults.map(x => Source.fromString(x).getLines.map(_.trim).filterNot(_.isEmpty).toVector)
+    }
+
+    // contains the last column. We need to con
+    val url: Vector[Vector[String]] = for {
+      line <- extraSplit
+      if line.length > 9
+    } yield Vector(line(0), line(1), {line(2).split("\\s+").last + line(3).split("\\s+").last +
+      line(4).split("\\s+").last + line(5).split("\\s+").last + line(6).split("\\s+").last +
+      line(7).split("\\s+").last + line(8).split("\\s+").last + line(9).split("\\s+").last +
+      line(10).split("\\s+").last + line(11).split("\\s+").last + line(12).split("\\s+").last +
+      line(13).split("\\s+").last + line(14).split("\\s+").last + line(15).split("\\s+").last +
+      line(16).split("\\s+").last }.splitProtect("""\.\.\.\.""")(0))
+
+    /** Replace all occurrences of ".." or "..." with a single period. */
+    val replaceExtraPeriods = replaceTwoOrThree(url)
+    // Regex to remove "Process" from line.
+    val regex = "Process\\s".r
+
+    /** Code will be removed when program runs. */
+    for{
+      line <- replaceExtraPeriods
+      result <- line
+    } println(result)
+
+    val yaraUrl = replaceExtraPeriods.map(x => YaraParseString( x(0), regex.replaceAllIn(x(1), ""), x(2)))
+
+    /*
+    val yar: Array[YaraParse] = for{
+      line <- extraSplit
+      if line.length > 3
+    } yield YaraParseUrl( "url", line(0), line(1), line(2).split(' ')(17))
+    val dropExtra = extraSplit.map(_.drop())
+*/
+    return yaraUrl
+  } // END parseYaraUrls()
+
+  /** Replace all sequences of periods w/ single periods. */
+  def replaceTwoOrThree(url: Vector[Vector[String]]): Vector[Vector[String]] = {
+   val regex3 = "\\.\\.\\.".r
+   val regex2 = "\\.\\.".r
+
+   val replace3: Vector[Vector[String]] = url.map(x => x.map(y => regex3.replaceAllIn(y, ".")))
+   val replace2: Vector[Vector[String]] = replace3.map(x => x.map(y => regex2.replaceAllIn(y, ".")))
+
+   return replace2
+  } // END removeTwoOrThree
+
+} // END AutomateYara object
+/****************************************************************************************************/
+/****************************************************************************************************/
+/*********************************** DetectRegPersistence Object ************************************/
+/****************************************************************************************************/
+/****************************************************************************************************/
+
+/**
+  * I'm leaving the code to create a map to all repeated handles with a lot of repeat links,
+  * but this will probably need to be removed eventually because the map contains information
+  * that is not helpful. We are more concerned with the Run key than the other keys.
+  */
+/** (Key -> count),(Key -> Scan Results) */
+case class RegPersistenceInfo(persistenceMap: mutable.Map[String, Int],
+                              scanMap: mutable.Map[String, Option[String]],
+                              handles: RegistryHandles){
+  override def toString( ): String = {
+    var persistenceMapInfo = s"Please check the following registry key and make sure it is the Run key:\n" +
+      s"${handles.runKey}\nThe ${handles.runKey} occurs ${handles.runCount} times.\n\nIf there are a lot of links" +
+      s"to the Run key from this process, it is likely that an attacker established persistence to pid: ${handles.pid}"
+    var scans = ""
+    for ((key, value) <- scanMap){
+      val occurrences = scanMap(key).getOrElse(0)
+      persistenceMapInfo = persistenceMapInfo + s"\n$key occurred $occurrences times."
+      scans = s"\n" + scans + s"$key\n" + value.getOrElse("THERE WERE NO SCAN RESULTS FOR THIS VALUE")
+    }
+    if (scanMap.nonEmpty){
+      s"%nThere were multiple indications that an attacker might have established registry Persistence: " +
+        persistenceMapInfo + scans
+    } else {
+      "There is no indication that an attacker set up links to the registry to maintain persistence.\n" +
+        persistenceMapInfo
+    } // END if/else
+  } // END toString()
+
+} // END case class RegPersistenceInfo
+
+case class RegistryHandles(pid: String,                   // pid
+                           map: mutable.Map[String, Int], // map of process to count
+                           runKey: Vector[String],        // Information in run key
+                           runCount: Int)                 // Number of times run occurred.
+
+object DetectRegPersistence extends VolParse {
+
+  def run( mem: String, os: String, pid: String ): RegPersistenceInfo = {
+    val persistHandles: RegistryHandles = regPersistence( mem, os, pid )
+    val testResult: ArrayBuffer[String] = regCountTest( persistHandles.map )
+    val interrogation = interrogateReg(mem, os, testResult, persistHandles)
+
+    return interrogation
+  } // END run()
+  /**
+    * regPersistence()
+    * Looks for repeat links to the Run key which is indicative that an attacker
+    * @param memFile
+    * @param os
+    * @param pid
+    * @return RegistryHandles contains each duplicate value and the number of
+    *         occurrences in a Map[String, Int], the FQDN to the RUN key for this system,
+    *         and the count of the times run occurs.
+    */
+  def regPersistence( memFile: String, os: String, pid: String ): RegistryHandles = {
+
+    val detectRegPersistence = {
+      Some( s"python vol.py -f $memFile --profile=$os handles --object-type=Key --pid=$pid".!!.trim )
+    }
+
+    /** We need to look through registry key names and find ones w/ numerous open handles to the same key */
+    val regPersistVec: Vector[String] = {
+      parseOutputDashVec( detectRegPersistence.getOrElse( "" ) )
+    }.getOrElse( Vector[String]() )
+    val runKeys: Option[Vector[String]] = Some(regPersistVec.filter(_.endsWith("RUN")))
+    val runCount = runKeys.getOrElse(Vector[String]()).length
+
+    /** Contains a Vector of each value with a duplicate */
+    val dupKeys = regPersistVec.diff( regPersistVec.distinct ).distinct
+
+    /** Loop through and count the occurrences of each duplicate item */
+    var mapToCount = mutable.Map[String, Int]()
+    var i = 0
+    var j = 0
+    while ( i < dupKeys.length ) {
+      var count: Int = 0
+      j = 0
+      while ( j < regPersistVec.length ) {
+        if ( regPersistVec( j ) equals dupKeys( i ) ) {
+          count += 1
+          j += 1
+        } // END if
+      } // END inner while
+      mapToCount += (dupKeys( i ) -> count)
+      i += 1
+    } // END while
+
+    return RegistryHandles(pid, mapToCount, runKeys.getOrElse(Vector("", "")), runCount)
+  } // END regPersistence()
+
+  /** Returns an Array of each key that occurred 3 or more times  */
+  def regCountTest( map: mutable.Map[String, Int] ): ArrayBuffer[String] = {
+    val arr: ArrayBuffer[String] = ArrayBuffer[String]()
+    for ( (key, value) <- map ) {
+      if ( value > 2 ) arr += key.trim
+    } // END for
+
+    return arr
+  } // END regExamCountTest
+
+  def interrogateReg( memFile: String,
+                      os: String,
+                      arr: ArrayBuffer[String],
+                      handles: RegistryHandles): RegPersistenceInfo = {
+
+    val map = handles.map
+    val scans: ArrayBuffer[Option[String]] = ArrayBuffer[Option[String]]()
+    val regMap: mutable.Map[String, Int] = mutable.Map[String, Int]()
+    val scanMap: mutable.Map[String, Option[String]] = mutable.Map[String, Option[String]]()
+
+    for(key <- arr) {
+      scanMap += (key -> Some( s"python vol.py -f $memFile --profile=$os printkey -K $key".!!.trim ))
+      regMap += (key -> map(key))
+    }
+
+    return RegPersistenceInfo(regMap, scanMap, handles )
+  } // END interrogateReg()
+} // END RegPersistence object
+
+/**
+/*************************** VadScan object **************************/
+object VadScan extends VolParse {
+
+  def run(os: String, memFile: String, pid: String): Unit = {
+    /** (heapLoc_1 = allHeapLocs, heapLoc_2 = especially important heap locations (contains "extra" flag)) */
+    val heapLoc(Vector[String], Vector[Option[String]]) = getHeapLoc(os, memFile, pid)
+    val vadInfo: Option[String] = Some(s"python vol.py -f $memFile --profile=$os vadinfo -p $pid")
+
+    /** Before we run vadinfo we need to filter out only the VADs that contain process heaps.
+  *
+  * It'd be nice to break down vadinfo output into separate Array locations to make filtering easy.
+  * What indicator is there that a VAD start starts and stops.
+  * */
+
+    // We need to filter out items with VadS and that start with VAD node Flags, Protection, FileObject, Vad Type
+    // The reason we keep VAD node is so we can figure out each time the collection is dealing with a different node.
+    // Keep items that start with Control Flags and contain Image
+
+    // If node starts with Flags: but does not contain CommitCharge or MemCommit, the memory range is reserved,
+    // but the OS has not paired it with any physical pages.
+
+    // NOTES:
+    // CommitCharge Flag: Specifies the number of pages committed in the region described by the VAD node
+    // Protection Flag: Don't assume too much based on the Protection flag because it can change.
+    // PrivateMemory: A process' heaps, stacks, and ranges allocated with VirtualAlloc or VirtualAllocEx
+    // are usually marked as private. (indication of possible code injection (204))
+    // VirtualAllocEx is used to allocate memory in a remote process.
+    // If the PrivateMemory bit is set for a memory region, it does not contain mapped files,
+    // named shared memory, and copy-on-write DLLs.
+
+    /** After we get a nice chunk of info about memory regions we should check out, use vaddump to dump to disk.
+  * Need to pass the start address to vaddump
+  */
+
+  } // END run()
+
+  /**
+  * getHeapLoc()
+  * Narrow down our search of a process by locating heaps.
+  * @return Tuple: (Vector[Option[String]], Vector[Option[String]])
+  *         (All heap memory locations, important heap locations because they contain "extra" flag)
+  * */
+  def getHeapLoc(os: String, memFile: String, pid: String): (Vector[Option[String]], Vector[Option[String]]) = {
+    val heapInfo = Some(s"python vol.py -f $memFile --profile=$os heaps -p $pid")
+    val parsedHeapInfo = parseOutputAsterisks(heapInfo.getOrElse("")).getOrElse(Vector[String]())
+    val pattern = """0x\d+""".r
+    val pattern_HEAP = """_HEAP+""".r
+    /** Find the VADs heapLocs to help us narrow the amount of data we need to search through (224)
+  * This might be more useful for general forensics versus intrusion detection/malware analysis */
+    val heapLocs = parsedHeapInfo.map(x => pattern_HEAP.findAllIn(x).toString)
+    val allHeapsMemLoc = heapLocs.map(x => pattern.findFirstIn(x))
+    /** Contains heap locations with "extra" flag. More important than heapLocs in general. */
+    val heapLocsExtra: Vector[Option[String]] = parsedHeapInfo.filter(_.contains("extra"))
+      .map(x => pattern.findFirstIn(x))
+
+    /** we can pass this info to volshell to see what's there with db(memLoc) (pg. 226) */
+    return (allHeapsMemLoc, heapLocsExtra)
+  } // END getHeapLoc()
+
+} // END VadScan object
+  */
+
+/**
+  * IDEAS:
+  * Write loop to create regexes like this "\w+system32/\w+[kernel32.dll]
+  * - the [kernel32.dll] part of regex can be created using list generated from prefetch parser.
+  * - maybe write it to detect any paths with variations of system32 also
+  *
+  * Look for DLLs (I'm sure there are others):
+  * ws2_32.dll - networking
+  * crypt32.dll - cryptography
+  * hnetcfg.dll - firewall maintenance
+  * pstorec.dll - access to protected storage
+  */
+
+/****************************************************************************************************/
+/****************************************************************************************************/
+/*********************************** DetectUnlinkedDlls Object **************************************/
+/****************************************************************************************************/
+/****************************************************************************************************/
+/*
+ * NOTE!!!!!!
+ * If an unlinked DLL is found, it'd be a good idea to do a svcscan and see if a service starts from it.
+ */
+final case class LdrInfo( pid: String,
+                            baseLoc: Vector[String], // base location of DLL.
+                            probs: Vector[String]){  // Finds lines that indicate there's an unlinked DLL.
+  override def toString: String = {
+    if(probs.isEmpty)""
+    else probs.mkString("\n")
+  } // END toString()
+} // END LdrInfo case class
+
+final case class DllInfo(pid: String, memRange: Vector[DllHexInfo], command: String){
+  override def toString: String = "Pid: " + pid + "\nCommand Found: " + command + "\n"
+} // END DllInfo case class
+
+object DllScan extends VolParse {
+
+  def run(os: String, memFile: String, pidVec: Vector[String]): (Vector[DllInfo], Vector[LdrInfo]) ={
+    /** ldrMemLoc contains memory locations we'll pass to dlldump & ldrFullScan contains filtered scan */
+    val ldrInfo : Vector[LdrInfo] = {
+      for(pid<- pidVec) yield ldrScan(memFile, os, pid)
+    } //
+
+    val dllInfo: Vector[DllInfo] = for(pid<- pidVec) yield dllListScan(memFile, os, pid)
+
+    return (dllInfo, ldrInfo)
+  } // END run()
+
+  /**
+    * ldrScan()
+    * Runs ldrmodules and finds helpful information.
+    * @param memFile
+    * @param os
+    * @param pid
+    */
+  private[this] def ldrScan(memFile: String, os: String, pid: String): LdrInfo = {
+    /** We want to find each process that has a False value in it.
+      * We also want to look for executables w/ no Mapped Path */
+
+    // regex to find exec w/ no mapped path. NOT USED IN CODE!!
+    val noMappedPath = """.\\.\\.""".r
+
+    val ldr: Option[String] = Some( s"python vol.py -f $memFile --profile=$os ldrmodules -p $pid -v".!!.trim )
+    val ldrParsed: Option[Vector[String]] = parseOutputNoTrim(ldr.getOrElse(""))
+
+    // Verbose output includes paths. Should probably check for path discrepancies before filter (Warning p. 238)
+
+    val problems: Vector[String] = ldrParsed.filter(_.contains("False")).getOrElse(Vector[String]())
+    val problemsFound = problems.filter(x => x.toLowerCase.contains(".dll"))
+    val trimmedProbs = problemsFound.map(_.trim)
+
+    val pattern = "0x\\w+".r
+    val baseLocations: Vector[String] = trimmedProbs.map(x => pattern.findFirstIn(x).getOrElse(""))
+
+    LdrInfo(pid, baseLocations, problems)
+  } // ldrScan()
+
+  /** Returns PID, Vector with Memory Location range of DLL, and Command Line Information) */
+  private[this] def dllListScan(memFile: String, os: String, pid: String): DllInfo = {
+
+    val dllList: Option[String] = Some( s"python vol.py -f $memFile --profile=$os dlllist -p $pid".!!.trim )
+    val parseAsterisks: Vector[String] = parseOutputAsterisks(dllList.getOrElse("")).getOrElse(Vector[String]())
+
+    val commandLine = parseAsterisks.filter(_.contains("Command"))
+    val filterDLL: Vector[String] = parseOutputDashVec(dllList.getOrElse("")).getOrElse(Vector[String]())
+
+    val grabDllInfo: Vector[DllHexInfo] = locateDll(memFile, os, pid)
+
+    /** Filter out DLLs loaded because specified by IAT (not explicitly loaded) */
+    val dllWithRemoveIAT = filterDLL.filterNot(_.contains("0xffff"))
+
+    val dllWithProcRemoved: Vector[String] = dllWithRemoveIAT.filter(x => x.toLowerCase.contains("dll"))
+    //val dllString: String = dllWithProcRemoved.mkString("\n")
+
+    /** RETURN Statement
+      * We want to know pid, memory range, and commandline stuff. */
+    if(commandLine.nonEmpty) DllInfo(pid, grabDllInfo, commandLine(0))
+    else DllInfo(pid, grabDllInfo, "No Command Line Info")
+  } // END dllListScan()
+
+  /** Find DLL memory location ranges.  */
+  private[this] def locateDll(memFile: String, os: String, pid: String): Vector[DllHexInfo] = {
+    val dllList = Some( s"python vol.py -f $memFile --profile=$os -p $pid dlllist".!!.trim )
+
+    val parsed: Option[Vector[String]] = parseOutputDashVec(dllList.getOrElse(""))
+
+    /** Filter out DLLs loaded because specified by IAT (not explicitly loaded) */
+    val dllWithRemoveIAT = parsed.filterNot(_.contains("0xffff"))
+
+    val parse2d: Option[Vector[Vector[String]]] = vecParse(dllWithRemoveIAT.getOrElse(Vector[String]()))
+    val parsedRemoveOpt = parse2d.getOrElse(Vector[Vector[String]]())
+
+    val pertinentInfo: Vector[Vector[String]] = {
+      parsedRemoveOpt.map(x => Vector(x(0), x(1), x(3)))
+    }
+
+    val hexRange: Vector[DllHexInfo] = for {
+      line <- pertinentInfo
+    } yield new DllHexInfo(pid, line(2), hex2Int(line(0)), hex2Int(line(0)) + hex2Int(line(1)))
+
+    return hexRange
+  } // END locateDll()
+
+  /** convert hex memory location to an integer. */
+  private[this] def hex2Int(hex: String): Int = {
+    Integer.parseInt(hex.drop(2), 16)
+    // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
+  } // END hex2Int
+
+} // END DetectUnlinkedDLLs object
