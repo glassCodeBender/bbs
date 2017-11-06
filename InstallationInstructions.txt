@@ -1,0 +1,53 @@
+##Mac OS Installation Instructions
+
+NOTE: These instructions assume you don't know very much.
+OTHER NOTE: THESE ARE INCOMPLETE BECAUSE THE PROGRAM IS INCOMPLETE.
+            The reason I wrote the instructions now is because I had to reinstall Mac OS.
+
+Install Anaconda (From continuum analytics)
+- Google search for "python Anaconda". 
+- Anaconda is a super easy package and environment manager.
+- You might as well install python 3.6 because we will create a python 2.7 environment.
+
+Create Python 2 Environment
+~$ conda create -n py2 python=2.7.13 anaconda
+
+Install Java 8 (NOT Java 9)
+http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html 
+
+Install Intellij Idea (When you run it, make sure to install Scala package)
+
+Open the Intellij Idea Projects Directory
+~$ cd IdeaProjects/bbs 
+
+Grab Big Brain Security Project from GitHub
+~$ git clone 
+
+Install Homebrew
+
+~$ /usr/bin/ruby -e "$(curl –fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+Install Scala (this allows you to run Scala from the command line, but it’s not necessary)
+~$ brew install scala 
+
+Install SBT 
+~$ brew install sbt@1
+
+~$ brew install yara
+NOTE: If you run your computer as a local user, you’ll need to log in to your administrator account to run this command. 
+~$ pip install distorm3
+~$ pip install yara-python
+~$ pip install pil
+~$ pip install openpyxl
+
+Install volatility and create volatility directory
+~$ git clone https://github.com/volatilityfoundation/volatility.git
+
+Activate Python 2 Environment 
+~$ source activate py2 
+
+Open the volatility directory
+~$ cd volatility 
+Place Any Memory Images in the Volatility Directory
+
+
+
