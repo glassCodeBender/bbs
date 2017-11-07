@@ -1115,6 +1115,7 @@ object DllScan extends VolParse {
 
     /*****************************
       * LOOK FOR meterpreter DLL.
+      * metsrv.dll
       ****************************/
 
     // Verbose output includes paths. Should probably check for path discrepancies before filter (Warning p. 238)
