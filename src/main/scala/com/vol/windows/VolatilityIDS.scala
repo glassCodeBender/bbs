@@ -11,7 +11,7 @@ import scala.io.Source
 import sys.process._
 import java.io.File
 import java.util.Calendar
-
+import com.bbs.vol.processtree._
 import scala.collection.immutable.TreeMap
 
 object VolatilityIDS {
@@ -74,7 +74,9 @@ object VolatilityIDS {
 
   /** Parses the config file. */
   private[this] def parseConfig( ): (String, String) = {
-    val src = Source.fromFile( "/Users/xan0/Documents/School/IndependentStudy/bbs_config.txt" )
+
+    val fileName = System.getProperty("user.dir") + "/" + "bbs_config.txt"
+    val src = Source.fromFile( fileName )
     val readConfig = src.getLines.filterNot( _.contains( "#" ) )
       .toVector
     src.close
@@ -176,7 +178,7 @@ object VolatilityIDS {
     */
   private[windows] def commonProcesses(): Map[String, String] = {
     val procMap = Map[String, String](
-    "SVCHOST.EXE" -> "The file svchost.exe is the Generic Host Process responsible for creating Services. This is a common Windows process.",
+    "SVCHOST.EXE" -> "The file svchost.exe is the Generic Host Process responsible for creating Services. Attackers commonly inject code into this process.",
     "CSRSS.EXE" -> "The Microsoft Client Server Runtime Server subsystem utilizes the process for managing the majorify of the graphical instruction sets under the Microsoft Windows operating system. As such Csrss.exe provides the critical functions of the operating system. Csrss.exe controls threading and Win32 console window features.",
     "WINLOGON.EXE" -> "winlogon.exe is a process belonging to the Windows login manager. It handles the login and logout procedures on your system.",
     "ADSERVICE.EXE" -> "Active Disk Service is a component of the Iomega zip drive.",
@@ -229,7 +231,7 @@ object VolatilityIDS {
     "ATIPTAXX.EXE" -> "Comes with ATI video card drivers. The processes provide faster access to the graphics card settings on the taskbar or individual keys.",
     "ATI2EVXX.EXE" -> "Comes with ATI video card drivers. The processes provide faster access to the graphics card settings on the taskbar or individual keys.",
     "RAVCPL64.EXE" -> "Realtek HD Audio Manager. The process detects which audio devices are connected to your computer, including headphones or a microphone. Conveniently, the devices are also recognized without the process and will run anyway.",
-    "NWIZ.EXE" -> "Usually accompanies a NVIDIA graphics card. Anyone who uses NVIDIA nViewfunctions needs the process. but it’s otherwise unnecessary.",
+    "NWIZ.EXE" -> "Usually accompanies a NVIDIA graphics card.",
     "CCC.EXE" -> "ATI Catalyst Control Center. For gamers and users with higher demands for the graphic settings on their PC, this is certainly interesting; for everyone else, it’s not necessary.",
     "SYNTPENH.EXE" -> "Is used on many laptops and has drivers for touchpads, but Windows can provide these too. In addition, Synaptics TouchPad Enhancements is a known solution for stability problems.",
     "WINAMPA.EXE" -> "Places Winamp to the right at the bottom of the taskbar and makes sure that no other programs with media content are linked.",
@@ -312,11 +314,81 @@ object ProcessDescription {
 
 } // END ProcessDescription object
 
+
+/** Contains info that will help determine which info to print in report and the risk the system faces. */
+final case class RiskRating(riskRating: Integer)
+
 /** Class looks at the results of previous scans and determines if indicators of a breach were found. */
 object FindSuspiciousProcesses{
 
-  def run() ={
+  def run(disc: Discovery, process: ProcessBrain) = {
 
-  }
+    /** */
+    var riskRating = 0
+
+    /**
+      * Get info from Discovery case class
+      */
+
+    val proc: Vector[ProcessBbs] = disc.proc._1
+    /** callbacks, hiddenModules, timers, deviceTree, orphanThread, found */
+    val rootkit: RootkitResults = disc.rootkit
+    /** (pid -> Remote Mapped Drive) */
+    val remoteMapped: Vector[(String, String)] = disc.remoteMapped
+    /** Vector[String], Vector[String] */
+    val (userReg, sysReg) = disc.registry
+    /** svcStopped, suspCmds */
+    val sysSt: SysState = disc.sysState
+
+    /**
+      * Get info from ProcessBrain
+      */
+    /** Need  */
+    val yaraObj: YaraBrain = process.yara
+    val regPersist: Vector[RegPersistenceInfo] = process.regPersistence
+    val ldr: Vector[LdrInfo] = process.ldrInfo
+    val privs: Vector[Privileges] = process.privs
+    val yarSuspicious: YaraSuspicious = yaraObj.suspItems
+
+    /** Grab significant yara scan findings */
+    val yarMalware: Vector[YaraParseString] = yaraObj.malware
+    val antidebug: Vector[YaraParse] = yarSuspicious.antidebug
+    val exploitKits: Vector[YaraParse] = yarSuspicious.exploitKits
+    val webshells: Vector[YaraParse] = yarSuspicious.webshells
+    val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
+    val suspStrs: Vector[YaraParseString] = yarSuspicious.suspStrings
+
+    /**
+      * TO DO:
+      * Remote Mapped Drive Scan
+      * Hidden DLL
+      * Registry Persistence - RUN key
+      * meterpreter DLL
+      * consoles
+      * Look at prefetch key
+      * Hidden Processes
+      * Enabled Privileges
+      * Stopped Suspicious Services
+      * Analyze envars
+      * Rootkit Detector
+      * - Orphan Threads
+      * - Hidden Modules
+      * - Unloaded Modules
+      * - Timers to Unknown Modules
+      * - callbacks
+      * Yara Scan Results
+      * - Packers
+      * - Anti-Debug
+      * - Exploit Kits
+      * - Webshells
+      * - CVEs
+      * - Malicious Documents
+      * - Suspicious Strings
+      * - Malware
+      * - XOR (RESEARCH)
+      * - Magic (Research)
+      */
+
+  } // END run()
 
 } // END FindSuspiciousProcesses object
