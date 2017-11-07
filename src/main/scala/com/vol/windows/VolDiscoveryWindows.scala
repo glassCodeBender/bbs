@@ -1,5 +1,7 @@
 package com.bbs.vol.windows
 
+import StringOperations._
+
 /**
   * @author J. Alexander
   * @version 1.0
@@ -8,7 +10,7 @@ package com.bbs.vol.windows
   *      store them in variables that we can parse and use in another program.
   */
 
-import com.bigbrainsecurity.utils.nlp.StringOperations._
+// import com.bigbrainsecurity.utils.nlp.StringOperations._
 import java.io.File
 import java.util.Calendar
 
@@ -123,7 +125,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
     * This is the functional main method for performing our initial
     * volatility scans. Based on these results, we'll perform more scans.
     */
-  def run( ): Discovery = {
+  private[windows] def run( ): Discovery = {
 
     /************************ PERFORM VOLATILITY SCANS **************************/
 
@@ -141,8 +143,8 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
       */
 
     //processScanResults._1.foreach(println) // printing psscan after it was parsed
-    println("\nPrinting process tree results:\n\n")
-    println(processScanResults._2) // Printing processtree
+    //println("\nPrinting process tree results:\n\n")
+    //println(processScanResults._2) // Printing processtree
 
     /** Scan network connections */
     val netScanResult : (Vector[NetConnections], Vector[String]) = NetScan.run(memFile, os)
@@ -162,8 +164,15 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
      val sysRegistry: Vector[String] = sysRegistryCheck()
      val userRegistry: Vector[String] = userRegistryCheck()
 
+    /****************************************************************************
+      ***************************************************************************
+      * THIS NEEDS TO BE BASED ON THE VERSIONS OF WINDOWS THEY ARE RUNNING!!!!
+      ***************************************************************************
+      ***************************************************************************/
+
     println("\nPrinting Significant System Registry Keys:\n\t")
     sysRegistry.foreach(println)
+
     println("\n\nPrinting Significant User Registry Keys:\n\t")
     userRegistry.foreach(println)
 
@@ -189,8 +198,10 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
 
     val mftFileName: String = "mft_bbs" + Calendar.HOUR + "-" + Calendar.MINUTE + ".body"
     // Outputting MFT as body file so it's easily parsed w/ sleuthkit
-    Some(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
-  }
+    Try(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
+      .getOrElse("")
+  } // END extractMFT()
+
   private[this] def extractEVT(): Unit = {
     /**
       * Events we want to look for:
@@ -203,13 +214,13 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
 
     if(os.startsWith("WinXP") || os.startsWith("Win2003")){
       // saved result is pipe separated txt file with Date/Time|Log Name| Computer Name|SID|Source|EventID|Event Type|Message
-      Some(s"python vol.py -f $memFile --profile=$os evtlogs -v --save-evt -D $dump".! )
+      Try(s"python vol.py -f $memFile --profile=$os evtlogs -v --save-evt -D $dump".! ).getOrElse("")
       // NOTE: It'd be nice to have a python program written in pandas to deal w/ this output, but that's probably too much because OS XP.
     } else{
       // Not sure what output looks like, but possibly use Evtxparser to get XML format of logs
-      Some(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $dump".! )
+      Try(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $dump".! ).getOrElse("")
       // should probably create a evtxdump.pl dependency in program so the output is easier to deal with.
-    }
+    } // END if/else
   } // END extractEVT
 
   /**
@@ -281,7 +292,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
 
   /** Need to add ethscan plugin. */
   def pcap = {
-    Some(s"python vol.py -f $memFile --profile=$os ethscan -C $dump/out.pcap".!!.trim )
+    Try(s"python vol.py -f $memFile --profile=$os ethscan -C $dump/out.pcap".! ).getOrElse("")
   }
 } // END AutomateVolDiscoveryWindows object
 
@@ -323,10 +334,16 @@ object ProcessBbsScan extends VolParse {
     *
     * This logic does not seem correct. Shouldn't this be pslist?
     * */
+  /****************************************************************************
+    * NEED TO CHANGE LOGIC TO DEAL WITH SPACES!!!!!!!
+    ***************************************************************************/
+
   private[this] def psScan(memFile: String, os: String): Vector[ProcessBbs] = {
 
-    val psScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os psscan".!!.trim )
-    val psScanParse: Vector[String] = parseOutputDashVec( psScan.getOrElse("") ).getOrElse(Vector[String]())
+    println("\n\nRunning psscan...\n\n")
+
+    val psScan: String = Try( s"python vol.py -f $memFile --profile=$os psscan".!!.trim ).getOrElse("")
+    val psScanParse: Vector[String] = parseOutputDashVec( psScan ).getOrElse(Vector[String]())
     val psScanWithCol: Vector[Vector[String]] = vecParse( psScanParse ).getOrElse( Vector[Vector[String]]() )
 
     // We are going to skip this for now.
@@ -364,7 +381,7 @@ object ProcessBbsScan extends VolParse {
     val processVec: Vector[ProcessBbs] = for {
       row <- vec
       if row.size >= 7
-    } yield new ProcessBbs(row(2), row(0), row(1), row(3), row(5) + " " + row(6))
+    } yield new ProcessBbs(row(2).trim, row(0).trim, row(1).trim, row(3).trim, row(5).trim + " " + row(6).trim)
 
     return processVec
   } // filterPsScan()
@@ -379,10 +396,18 @@ object ProcessBbsScan extends VolParse {
     */
   private[this] def psxScan(memFile: String, os: String): Vector[Vector[String]] = {
 
+    println("\n\nRunning psxview scan...\n\n")
+
     /** DO VARIETY OF PROCESS SCANS */
     // If you see False in the splits column, there’s a problem.
-    val psxView: Option[String] = Some( s"python vol.py -f $memFile --profile=$os psxview —apply-rules".!!.trim )
-    val psxViewParse: Vector[String] = parseOutputDashVec( psxView.getOrElse( "" ) ).getOrElse( Vector[String]() )
+    val psxView: String = {
+      Try( s"python vol.py -f $memFile --profile=$os psxview —apply-rules".!!.trim )
+        .getOrElse("\n\npsxview scan failed. It's like that there is something wrong with your settings.")
+    }
+    println("\n\nPrinting psxview scan...\n\n")
+    println(psxView)
+
+    val psxViewParse: Vector[String] = parseOutputDashVec( psxView ).getOrElse( Vector[String]() )
     val psxWithColumns: Vector[Vector[String]] = vecParse( psxViewParse ).getOrElse( Vector[Vector[String]]() )
 
     val filtered = for{
@@ -395,19 +420,28 @@ object ProcessBbsScan extends VolParse {
 
   private[this] def psTreeScan(memFile: String, os: String): String = {
 
-    val pstree = Some( s"python vol.py -f $memFile --profile=$os pstree".!!.trim )
+    println("\n\nRunning pstree scan...\n\n")
 
-    return pstree.getOrElse("")
+    val pstree = Try( s"python vol.py -f $memFile --profile=$os pstree".!!.trim )
+      .getOrElse("pstree scan failed...\n\nIt is likely that something is wrong with your settings.\n\n")
+
+    println("\n\nPrinting pstree scan...\n\n")
+    println(pstree)
+
+    return pstree
   } // END psTreeScan
 
 } // END ProcessBbsScan object
 
-case class NetConnections( pid: String,
+final case class NetConnections( pid: String,
                            localIP: String,
                            destIP: String,
                            destLocal: Boolean = true,  // Is the destination IP address local?
                            vnc: Boolean ){              // Check if VNC port 5500 is listening.
-  override val toString = s"\n\n$pid\n$localIP\n$destIP\n$destLocal\nVNC Port Found: $vnc\n\n"
+  override val toString = {
+    s"\n\nPID: $pid\nLocal IP: $localIP\nDestination IP: $destIP\nDestination Local: " +
+      s"$destLocal\nVNC Port Found: $vnc\n\n"
+  }
 } // END NetConnections class
 
 /************************* Netscan Object *************************/
@@ -429,8 +463,17 @@ object NetScan extends VolParse {
 
   /** Scan finds both open and closed network connections */
   private[this] def connScan(memFile: String, os: String): (Vector[NetConnections], Vector[NetConnections]) = {
-    val conn: Option[String] = Some( s"python vol.py -f $memFile --profile=$os connscan".!!.trim )
-    val connParsed: Vector[String] = parseOutputDashVec(conn.getOrElse("")).getOrElse(Vector[String]())
+
+    println("\n\nPerforming connscan...\n\n")
+
+    val conn: String = {
+      Try( s"python vol.py -f $memFile --profile=$os connscan".!!.trim ).getOrElse("\n\nconnscan failed...\n\n")
+    }
+
+    println("\n\nPrinting connscan results...\n\n")
+    println(conn)
+
+    val connParsed: Vector[String] = parseOutputDashVec(conn).getOrElse(Vector[String]())
     val conn2d: Vector[Vector[String]] = vecParse(connParsed).getOrElse(Vector[Vector[String]]())
 
     val localConnects = for {
@@ -448,6 +491,10 @@ object NetScan extends VolParse {
 
     return (connInfo, outsideConnects)
   } // END connScan()
+
+  /****************************************************************************
+    * THIS IS WRONG!!!!!!!!
+    ***************************************************************************/
 
   /** Loop through all outside ip addresses and return whois info
     * I'll filter the output when the rest of the program is done and I have free time.
@@ -518,8 +565,12 @@ object SysStateScan extends VolParse {
   /** All the service scan related stuff runs out of this method. */
   private[this] def svcScan(memFile: String, os: String): (Vector[String], Vector[String]) = {
     // locate windows service records
-    val svc: Option[String] = Some( s"python vol.py -f $memFile --profile=$os svcscan --verbose".!!.trim )
-    val svcLines = Source.fromString(svc.getOrElse("")).getLines.toVector
+    println("\n\nRunning svcscan...\n\n")
+
+    val svc: String = {
+      Try( s"python vol.py -f $memFile --profile=$os svcscan --verbose".!!.trim ).getOrElse("")
+    }
+    val svcLines = Source.fromString(svc).getLines.toVector
     val svcOneLine: ArrayBuffer[String] = svcParse(svcLines)
 
     /** If this list is not empty, it's likely that someone is using malicious services. */
@@ -527,7 +578,7 @@ object SysStateScan extends VolParse {
 
     /** Need to grab */
 
-    println("\n\nPrinting suspicious services that were stopped...\n\n")
+    println("\n\nPrinting suspicious services that were stopped:\n\n")
     stoppedSvc.foreach(println)
 
     return (svcOneLine.toVector, stoppedSvc)
@@ -586,10 +637,14 @@ object SysStateScan extends VolParse {
   /** Until I fully understand the output of envars module, I'm just going to return full output */
   private[this] def envScan(memFile: String, os: String): String = {
 
-    /** environmental variables scan */
-    val envVars: Option[String] = Some( s"python vol.py -f $memFile --profile=$os envars --silent".!!.trim )
+    println("\n\nRunning envars scan...\n\n")
 
-    return envVars.getOrElse("")
+    /** environmental variables scan */
+    val envVars: String = {
+      Try( s"python vol.py -f $memFile --profile=$os envars --silent".!!.trim ).getOrElse("")
+    }
+
+    return envVars
 
     /*
     /** WARNING: Check with actual output because we might not need to drop while "---" */
@@ -644,7 +699,7 @@ object SysStateScan extends VolParse {
   } // END parseOutput()
   */
   /** Examines memory artifacts for commands run from the command prompt. */
-  def consoles( memFile: String, os: String ): (String, Vector[String]) = {
+  private[this] def consoles( memFile: String, os: String ): (String, Vector[String]) = {
 
     /** This list of suspicious commands should be a lot longer!
       * Consider adding @FOR to look for use of scripting (it's a for loop)
@@ -656,6 +711,7 @@ object SysStateScan extends VolParse {
       ".*(net\\sview|net\\suse|net\\suser|psexec|smbclient|wget|do|for|netsh|curl|sc|reg|enum|netcat|cryptcat|telnet|repair|backup).*"r
     }
 
+    /*
     val cmdExplanation = Map("net view" -> "Provides information about SMB shares.",
     "net use" -> "Establish SMB session from one Windows machine to another at a given IP address. With no args, allows user to see previous outbound SMB sessions.",
     "psexec" -> "Cause a target Windows machine to run a program.",
@@ -673,9 +729,12 @@ object SysStateScan extends VolParse {
     "wget" -> "Used for web request. Can be used to access nefarious web server.",
     "curl" -> "Used for web request. Can be used to access nefarious web server.",
     "do" -> "Indication that someone was doing commandline scripting.")
+    */
 
-    val consoles = Some( s"python vol.py -f $memFile --profile=$os consoles".!!.trim )
-    val consolesString = consoles.getOrElse("").toLowerCase
+    println("\n\nRunning consoles scan...\n\n")
+
+    val consoles = Try( s"python vol.py -f $memFile --profile=$os consoles".!!.trim ).getOrElse("")
+    val consolesString = consoles.toLowerCase
     val consolesScan = parseConsoles( consolesString ).getOrElse( Vector[String]() )
 
     /** Contains any of the above commands */
@@ -685,7 +744,7 @@ object SysStateScan extends VolParse {
     /** Operations on consoles. */
   } // END run()
 
-  def parseConsoles(volStr: String): Option[Vector[String]] = {
+  private[this] def parseConsoles(volStr: String): Option[Vector[String]] = {
     Some( Source.fromString(volStr)
       .getLines
       .dropWhile( !_.contains("Output:") )
@@ -712,7 +771,7 @@ object RootkitDetector extends VolParse {
     * @param memFile
     * @param os
     */
-  def run(memFile: String, os: String): RootkitResults = {
+  private[windows] def run(memFile: String, os: String): RootkitResults = {
 
     /** Returns hidden modules found and result of modscan - (hiddenModules, modscanResults) */
     val hiddenModules: (Vector[String], String) = findHiddenModules(memFile, os)
@@ -745,35 +804,44 @@ object RootkitDetector extends VolParse {
     timers.foreach(println)
 
     val deviceTree: String = deviceTreeScan(memFile, os)
-    println("Device Tree Scan Complete...\n\n")
-    println(deviceTree)
+    // println("Device Tree Scan Complete...\n\n")
+    // println(deviceTree)
 
     val thread: String = threadScan(memFile, os)
-    println("Orphan Thread scan complete...\n\n")
+    println("\nPrinting orphaned threads...\n\n")
     println(thread)
 
+    // return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread)
     return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread)
   } // END run()
 
   /**
-    *  THE FOLLOWING SCANS WERE NOT RUN!!!
+    *  This method throws a broken pipe exception. Probably a dependency issue.
     */
-  def deviceTreeScan(memFile: String, os: String): String = {
+  private[this] def deviceTreeScan(memFile: String, os: String): String = {
 
     /** We want to look at network, keyboard, and disk drivers (389) Also look for unnamed devices */
-    val deviceTree: Option[String] = Some( s"python vol.py -f $memFile --profile=$os devicetree".!!.trim )
-
-    return deviceTree.getOrElse("")
-  } // END deviceTreeScan()
-
-  def threadScan(memFile: String, os: String): String = {
-
-    /** Look for orphan threads 379-380 */
-    val orphanThreadScan: Option[String] = {
-      Some( s"python vol.py -f $memFile --profile=$os threads -F OrphanThread".!!.trim )
+    val deviceTree: String = {
+      Try( s"python vol.py -f $memFile --profile=$os devicetree".!!.trim )
+        .getOrElse("There was an error while reading devicetree scan...")
     }
 
-    return orphanThreadScan.getOrElse("")
+    return deviceTree
+  } // END deviceTreeScan()
+
+  private[this] def threadScan(memFile: String, os: String): String = {
+
+    /** Look for orphan threads 379-380 */
+    val orphanThreadScan: String = {
+      Try( s"python vol.py -f $memFile --profile=$os threads -F OrphanThread".!!.trim )
+        .getOrElse("An error occurred while performing OrpanThread scan...")
+    }
+
+    /************************************
+      * THIS COULD BE SPLIT on "------"
+      ***********************************/
+
+    return orphanThreadScan
   } // END threadScan()
 
   /**
@@ -783,7 +851,7 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return (Vector[String], Vector[String]) - (hiddenModules, completeModScan)
     */
-  def findHiddenModules(memFile: String, os: String): (Vector[String], String) = {
+  private[this] def findHiddenModules(memFile: String, os: String): (Vector[String], String) = {
 
     /** Look for loaded modules */
     val modules = modulesScan(memFile, os)
@@ -809,12 +877,14 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return
     */
-  def modulesScan(memFile: String, os: String): Vector[String] = {
+  private[this] def modulesScan(memFile: String, os: String): Vector[String] = {
 
-    val modulesScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os modules".!!.trim )
+    val modulesScan: String = Try( s"python vol.py -f $memFile --profile=$os modules".!!.trim ).getOrElse("")
 
-    val modules: Option[Vector[String]] = parseOutputDashVec(modulesScan.getOrElse(""))
-    val modulesParsed: Vector[Vector[String]] = vecParse(modules.getOrElse(Vector[String]())).getOrElse(Vector[Vector[String]]())
+    val modules: Option[Vector[String]] = parseOutputDashVec(modulesScan)
+    val modulesParsed: Vector[Vector[String]] = {
+      vecParse(modules.getOrElse(Vector[String]())).getOrElse(Vector[Vector[String]]())
+    }
     /** Grab column 1 */
     val moduleNames = modulesParsed(1)
 
@@ -829,13 +899,13 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return
     */
-  def modScan(memFile: String, os: String): (String, Vector[String]) = {
+  private[this] def modScan(memFile: String, os: String): (String, Vector[String]) = {
 
     /** I'd really like this scan to return the results of it's general scan also! */
 
-    val modScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os modscan".!!.trim )
+    val modScan: String = Try( s"python vol.py -f $memFile --profile=$os modscan".!!.trim ).getOrElse("")
 
-    val modules: Option[Vector[String]] = parseOutputDashVec(modScan.getOrElse(""))
+    val modules: Option[Vector[String]] = parseOutputDashVec(modScan)
     val modulesParsed: Vector[Vector[String]] = {
       vecParse(modules.getOrElse(Vector[String]())).getOrElse(Vector[Vector[String]]())
     }
@@ -843,7 +913,7 @@ object RootkitDetector extends VolParse {
     val moduleNames: Vector[String] = modulesParsed(1)
 
     /** Returns tuple with vector of modscan results and module names */
-    return (modScan.getOrElse(""), moduleNames)
+    return (modScan, moduleNames)
   } // END modScan()
 
   /**
@@ -853,13 +923,15 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return
     */
-  def unloadedModulesScan(memFile: String, os: String): Vector[String] = {
+  private[this] def unloadedModulesScan(memFile: String, os: String): Vector[String] = {
 
     // Regex to grab the module name
     val unloadedRegex = "\\w+".r
 
-    val unloadedModScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os unloadedmodules".!!.trim )
-    val unloadedModules = parseOutputVec( unloadedModScan.getOrElse("") )
+    val unloadedModScan: String = {
+      Try( s"python vol.py -f $memFile --profile=$os unloadedmodules".!!.trim ).getOrElse("")
+    }
+    val unloadedModules = parseOutputVec( unloadedModScan )
 
     val unloadedNames = unloadedModules.getOrElse(Vector[String]() ).map(x => unloadedRegex.findFirstIn(x))
 
@@ -874,15 +946,17 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return
     */
-  def timerScan(memFile: String, os: String): Vector[String] = {
+  private[this] def timerScan(memFile: String, os: String): Vector[String] = {
 
     /** Do this scan before doing the callback scan and driverscan */
 
     /** Look for kernel timers */
-    val timerScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os timers".!!.trim )
+    val timerScan: String = {
+      Try( s"python vol.py -f $memFile --profile=$os timers".!!.trim ).getOrElse("")
+    }
 
     // Might need to make this toUpperCase()
-    val timer = parseOutputDashVec( timerScan.getOrElse("") )
+    val timer = parseOutputDashVec( timerScan )
 
     // Find kernel timers to uknown modules
     val unknownTimers = timer.filter(_.contains("UNKNOWN"))
@@ -898,7 +972,7 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return (unknownModules, callbacks involving significant API calls)
     */
-  def callbackScan(memFile: String, os: String): (Vector[String], Vector[String]) = {
+  private[this] def callbackScan(memFile: String, os: String): (Vector[String], Vector[String]) = {
 
     // Stores API calls we want to look for
     val apiCalls = Vector( "PsSetCreateProcessBbsNotifyRoutine", "PsSetCreateThreadNotifyRoutine",
@@ -909,8 +983,10 @@ object RootkitDetector extends VolParse {
     /** It will be a problem if any if any of the api calls get snipped. Consider shortening */
 
     /** Perform callback scan */
-    val callbackScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os callbacks".!!.trim )
-    val callbackParsed = parseOutputDashVec(callbackScan.getOrElse(""))
+    val callbackScan: String = {
+      Try( s"python vol.py -f $memFile --profile=$os callbacks".!!.trim ).getOrElse("")
+    }
+    val callbackParsed = parseOutputDashVec(callbackScan)
 
     /** Look for unknown modules. It's likely we don't have to perform the toUpperCase transformation */
     val unknownModules = callbackParsed.getOrElse(Vector[String]())
@@ -930,19 +1006,23 @@ object RootkitDetector extends VolParse {
     return (unknownModules, callbacks)
   } // callbackScan()
 
-  def driverScan(memFile: String, os: String) = {
+  private[this] def driverScan(memFile: String, os: String) = {
 
     /** See notes and 382-383 for information about processing driver scans */
-    val driverScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os driverscan".!!.trim )
+    val driverScan: String = {
+      Try( s"python vol.py -f $memFile --profile=$os driverscan".!!.trim ).getOrElse("")
+    }
 
     // Re-read Stealthy Hooks section and consider writing python plugin
 
   } // END driverScan()
 
-  def driverIrpScan(memFile: String, os: String) = {
+  private[this] def driverIrpScan(memFile: String, os: String) = {
 
     /** See notes and 382-383 for information about processing driver scans */
-    val driverIrpScan: Option[String] = Some( s"python vol.py -f $memFile --profile=$os driverirp -r tcpip".!!.trim )
+    val driverIrpScan: String = {
+      Try( s"python vol.py -f $memFile --profile=$os driverirp -r tcpip".!!.trim ).getOrElse("")
+    }
 
   } // END driverIrpScan()
 
@@ -950,7 +1030,7 @@ object RootkitDetector extends VolParse {
 
 /********************************** RemoteMappedDriveSearch *********************************/
 object RemoteMappedDriveSearch extends VolParse {
-  def run( memFile: String, os: String ): Vector[(String, String)] = {
+  private[windows] def run( memFile: String, os: String ): Vector[(String, String)] = {
 
     println("\nSearching for Remote Mapped Drives... \n")
     remoteMapped(memFile, os)
@@ -964,7 +1044,7 @@ object RemoteMappedDriveSearch extends VolParse {
     * @param os os
     * @return Vector(String, String) (pid -> Remote Mapped Info)
     */
-  def remoteMapped(memFile: String, os: String): Vector[(String, String)] = {
+  private[this] def remoteMapped(memFile: String, os: String): Vector[(String, String)] = {
     val remoteMapped: Option[String] = {
       Some( s"python vol.py -f $memFile --profile=$os handles -t File, Mutant".!!.trim )
     }
