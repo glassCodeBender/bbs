@@ -1,7 +1,7 @@
 package com.bbs.vol.httpclient
 
 import java.net.{HttpURLConnection, URL}
-import com.bbs.vol.windows.StringOperations._
+// import com.bbs.vol.windows.StringOperations._
 
 import scala.util.Try
 
@@ -18,8 +18,8 @@ final case class PageInfo( name: String,     // registered name
     if (name == "Connection failed.")
       "Connection failed."
     else {
-      s"Name: $name\nStreet: $street\nCity: $city\nState: $state\nPostal Code: $post\nCountry: $country\n" +
-        s"IP Address Range: $ipRange\nWhois Registration Info URL: $url"
+      s"\nWhois Results for $url\nName: $name\nStreet: $street\nCity: $city\nState: $state\nPostal Code: $post\nCountry: $country\n" +
+        s"IP Address Range: $ipRange\nWhois Registration Info URL: $url" + "\n"
     }
   } // END toString()
 
