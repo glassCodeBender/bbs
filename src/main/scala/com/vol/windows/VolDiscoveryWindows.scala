@@ -135,6 +135,9 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
     /** Contains Vector of processes and a ProcessBbs Tree */
     val processScanResults: (Vector[ProcessBbs], String) = ProcessBbsScan.run(memFile, os)
 
+    println("Printing process scan results\n")
+    processScanResults._1.foreach(println)
+
     /**
       * WARNING!!!!
       *
@@ -271,21 +274,25 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
     val key2 = "\"HKCU\\SOFTWARE\\Microsoft\\" + "\"" + "Windows NT" + "\"" + "\\CurrentVersion\\Windows\\Run\""
     val key3 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\Run\""
     val key4 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnce\""
+    val key5 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnceEx\""
 
-    val windows: Option[String] = {
-      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim )
+    val windows: String = {
+      Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
     }
     val ntRun = {
-      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim )
+      Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
     }
     val run = {
-      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim )
+      Try(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim ).getOrElse("")
     }
     val runOnce = {
-      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key4".!!.trim )
+      Try(s"python vol.py -f $memFile --profile=$os printkey -K $key4".!!.trim ).getOrElse("")
+    }
+    val runOnceEx = {
+      Try(s"python vol.py -f $memFile --profile=$os printkey -K $key5".!!.trim ).getOrElse("")
     }
 
-    val vec = Vector(windows.getOrElse(""), ntRun.getOrElse(""), run.getOrElse(""), runOnce.getOrElse(""))
+    val vec = Vector(windows, ntRun, run, runOnce, runOnceEx)
 
     return vec
   } // END userRegistryCheck()
@@ -315,9 +322,13 @@ object ProcessBbsScan extends VolParse {
     val psTreeResult: String = psTreeScan(memFile, os)
 
     /** Filter psxviewResult to only those w/ matching PIDs in psscan */
-    val shouldBeHidden: Vector[ProcessBbs] = psScanResult.filter((x: ProcessBbs) => psxviewResult.exists(y => y.contains(x.pid)))
+    val shouldBeHidden: Vector[ProcessBbs] = {
+      psScanResult.filter((x: ProcessBbs) => psxviewResult.exists(y => y.contains(x.pid)))
+    }
     /** Remove the pids that are hidden from pslist scan so we can combine them later without duplicates */
-    val hiddenRemoved: Vector[ProcessBbs] = psScanResult.filterNot((x: ProcessBbs) => psxviewResult.exists(y => y.contains(x.pid)))
+    val hiddenRemoved: Vector[ProcessBbs] = {
+      psScanResult.filterNot((x: ProcessBbs) => psxviewResult.exists(y => y.contains(x.pid)))
+    }
 
     val changeHidden = {
       shouldBeHidden.map((x: ProcessBbs) => ProcessBbs(x.pid, x.offset, x.name, x.ppid, x.timeCreated, hidden = true))
@@ -377,15 +388,69 @@ object ProcessBbsScan extends VolParse {
   /** Changing the way the map is created to get around */
   private[this] def filterPsScan(vec: Vector[Vector[String]]): Vector[ProcessBbs]  = {
 
-    /** Still need to deal w/ processes w/ blank spaces someday. */
     val processVec: Vector[ProcessBbs] = for {
       row <- vec
       if row.size >= 7
-    } yield new ProcessBbs(row(2).trim, row(0).trim, row(1).trim, row(3).trim, row(5).trim + " " + row(6).trim)
+    } yield grabProcess(row)
 
-    return processVec
+    /** Remove values w/ empty */
+    val procVec = for{
+      process <- processVec
+      if process.pid != "Empty"
+    } yield process
+    /***********************************************
+      * We still need to filter out duplicate pids
+      **********************************************/
+    return procVec
   } // filterPsScan()
 
+  /** Makes sure that we can handle processes that have spaces in their names */
+  private[this] def grabProcess(vector: Vector[String]): ProcessBbs = {
+
+    val vec = vector.map(_.toLowerCase)
+
+    /** This needs to check if the value at index after the process name is all numbers. */
+
+  if (Try(vec(2).toInt).isSuccess) {
+      ProcessBbs(vec(2).trim, vec(0).trim, vec(1).trim, vec(3).trim, vec(5).trim + " " + vec(6).trim)
+    }
+  else if(Try(vec(3).toInt).isSuccess){
+      ProcessBbs(vec(3).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim, vec(4).trim,
+        vec(6).trim + " " + vec(7).trim)
+    }
+  else if (Try(vec(4).toInt).isSuccess) {
+      ProcessBbs(vec(4).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim,
+        vec(5).trim, vec(7).trim + " " + vec(8).trim)
+    }
+  else if (Try(vec(5).toInt).isSuccess) {
+      ProcessBbs(vec(5).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim,
+        vec(6).trim, vec(8).trim + " " + vec(9).trim)
+    }
+  else if (Try(vec(6).toInt).isSuccess) {
+    ProcessBbs(vec(6).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim +
+      " " + vec(5).trim, vec(7).trim, vec(9).trim + " " + vec(10).trim)
+  }
+  else if (Try(vec(7).toInt).isSuccess) {
+    ProcessBbs(vec(7).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim +
+      " " + vec(5).trim + " " + vec(6).trim, vec(8).trim, vec(10).trim + " " + vec(11).trim)
+  }
+  else if (Try(vec(8).toInt).isSuccess) {
+    ProcessBbs(vec(8).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim +
+      " " + vec(5).trim + " " + vec(6).trim + " " + vec(7).trim, vec(9).trim, vec(11).trim + " " + vec(12).trim)
+  } // END if statements
+  else ProcessBbs("Empty", "Empty","Empty","Empty", "Empty")
+  } // END grabProcess()
+  /** Deprecated in favor of faster logic. */
+/*
+  /** Check if every value in a string is a number.*/
+  private[this] def allNumbers(str: String): Boolean = {
+    val charArr = str.toCharArray
+    val numBool: Array[Int] = charArr.map(x => Try(x.toInt).getOrElse(1234567))
+
+    if (numBool.contains(1234567)) false
+    else true
+  } // END allNumbers
+  */
   /**
     * psxScan()
     * Does psxScan and finds hidden processes and possibly hidden processes
@@ -412,10 +477,31 @@ object ProcessBbsScan extends VolParse {
 
     val filtered = for{
       row <- psxWithColumns
-      if (row(3).toUpperCase == "FALSE")
+      if Try(row(2).toInt).isSuccess
+      if row(3).toLowerCase == "false"
     } yield row
 
-    return filtered
+    val filtered2 = for{
+      row <- psxWithColumns
+      if Try(row(3).toInt).isSuccess
+      if row(4).toLowerCase == "false"
+    } yield row
+
+    val filtered3 = for{
+      row <- psxWithColumns
+      if Try(row(4).toInt).isSuccess
+      if row(5).toLowerCase == "false"
+    } yield row
+
+    val filtered4 = for{
+      row <- psxWithColumns
+      if Try(row(5).toInt).isSuccess
+      if row(6).toLowerCase == "false"
+    } yield row
+
+    val filterPsx = filtered ++: filtered ++: filtered2 ++: filtered3 ++: filtered4
+
+    return filterPsx
   } // psxScan
 
   private[this] def psTreeScan(memFile: String, os: String): String = {
@@ -704,25 +790,31 @@ object SysStateScan extends VolParse {
     /** This list of suspicious commands should be a lot longer!
       * Consider adding @FOR to look for use of scripting (it's a for loop)
       * Maybe also look for DO and @echo
-      * */
+      */
+
     // Looks for potentially suspicous commands that might give us insight into what was executed on command prompt.
     // FOR command should probably only return if found at the beginning of a line. (for and do will get false positives)
-    val pattern = {
-      ".*(net\\sview|net\\suse|net\\suser|psexec|smbclient|wget|do|for|netsh|curl|sc|reg|enum|netcat|cryptcat|telnet|repair|backup).*"r
-    }
+    val regString = ".*(net\\sview\\s|net\\suse\\s|net\\suser\\s|psexec\\s|smbclient\\s|wget\\s|do\\s|for\\s|" +
+      "wmic\\s+process\\s+call\\s+create\\s|"+
+      "netsh|curl\\s|sc\\s|reg\\s|enum\\s|cryptcat\\s|nc\\s|telnet\\s|at\\s|repair\\s|type\\s|backup\\s|nc\\.exe).*"
+    val pattern = regString.r
 
     /*
     val cmdExplanation = Map("net view" -> "Provides information about SMB shares.",
+    "at" -> "Used to create scheduled tasks on older versions of Windows",
+    "wmi process call create" -> "Run a process from the commandline.",
+    "start" -> "Start a process from the commandline (Windows XP and Server 2003)",
     "net use" -> "Establish SMB session from one Windows machine to another at a given IP address. With no args, allows user to see previous outbound SMB sessions.",
     "psexec" -> "Cause a target Windows machine to run a program.",
     "sc" -> "Remote service control",
     "reg" -> "Remote registry access",
     "enum" -> "Provide detailed information about SMB shares and systems. Like net view, but more detailed",
     "net view" -> "Provide information about SMB shares and systems.",
-    "netcat" -> "Can be used to establish a backdoor on a system. (and a lot of other non-malicious things)",
+    "nc" -> "Can be used to establish a backdoor on a system. (and a lot of other non-malicious things)",
     "cryptcat" -> "Can be used to establish a backdoor on a system with encrypted communcation.",
     "telnet" -> "Can be used for both malicious and non-malicious purposes. It's generally a security risk.",
     "net user" -> "Pull all the domain users.",
+    "type" -> "Used to create alternate data stream.",
     "smbclient" -> "Establish SMB session. Can be used to push or pull files from target.",
     "netsh" -> "Used for querying and changing networking settings. Can be used to disable firewall or learn the wifi password.",
     "for" -> "An indication that someone used a commandline for loop. Can be used for nefarious purposes.",
@@ -734,6 +826,10 @@ object SysStateScan extends VolParse {
     println("\n\nRunning consoles scan...\n\n")
 
     val consoles = Try( s"python vol.py -f $memFile --profile=$os consoles".!!.trim ).getOrElse("")
+
+    println("\n\nPrinting consoles scan...\n")
+    println(consoles)
+
     val consolesString = consoles.toLowerCase
     val consolesScan = parseConsoles( consolesString ).getOrElse( Vector[String]() )
 
@@ -811,6 +907,9 @@ object RootkitDetector extends VolParse {
     println("\nPrinting orphaned threads...\n\n")
     println(thread)
 
+    /************************************
+      * NEED TO PERFORM SSDT scan
+      ***********************************/
     // return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread)
     return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread)
   } // END run()
@@ -1063,7 +1162,7 @@ object RemoteMappedDriveSearch extends VolParse {
 
     val remoteTup: Vector[(String, String)] = remote2d.map(x => (x(1), x(5)))
 
-    println("Printing Remote Mapped Drive Values")
+    println("\nPrinting Remote Mapped Drive Values\n")
     remoteTup.foreach(println)
     return remoteTup
 /*
