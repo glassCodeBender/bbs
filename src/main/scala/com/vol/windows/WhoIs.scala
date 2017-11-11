@@ -33,10 +33,11 @@ class WhoIs(ip: String) {
 
     val url = "http://whois.arin.net/rest/ip/" + ip
 
-    val page = Try(grabPage(url, connectTimeOut, readTimeout, request)).getOrElse("The First Page Failed")
+    println("Querying with whois...\n")
+    val page = Try(grabPage(url, connectTimeOut, readTimeout, request)).getOrElse("The First Page Failed").trim
 
-    println("Printing page 1 content...\n")
-   // println(page)
+    // println("Printing page 1 content...\n")
+    // println(page)
 
     val (url2, netRange): (String, String) = parsePageUrl(page)
 
@@ -48,11 +49,15 @@ class WhoIs(ip: String) {
     val infoPage = Try(grabPage(url2, connectTimeOut, readTimeout, request))
       .getOrElse("Connection to second page failed...")
 
-    println("Printing second page content...\n")
-    println(infoPage)
+    // println("Printing second page content...\n")
+    // println(infoPage)
 
 
     val ipInfo: Vector[String] = parseInfo(infoPage)
+
+    println("Printing grabbed info from second page: ")
+    ipInfo.foreach(println)
+
     val fullUrl: String = url2 + ".html"
 
     return PageInfo(ipInfo(0), ipInfo(2), ipInfo(3), ipInfo(1), ipInfo(5), ipInfo(4), netRange, fullUrl)
@@ -60,14 +65,19 @@ class WhoIs(ip: String) {
   } // END query()
 
   private[this] def parseInfo(page: String): Vector[String] = {
-
-
+    
     val city: String = parseCity(page)
+    println("Finished city: " + city)
     val post: String = parsePost(page)
+    println("Finished post: " + post )
     val country: String = parseCountry(page)
+    println("Finished country: " + country)
     val state: String = parseState(page)
+    println("Finished state: " + state)
     val name: String = parseName(page)
+    println("Finished name: " + name)
     val street: String = parseStreet(page)
+    println("Finished street: " + street)
 
     return Vector(name, street, city, state, post, country )
   } // END parseInfo()
@@ -75,9 +85,11 @@ class WhoIs(ip: String) {
   /** Grab city from XML */
   private[this] def parseCity(page: String): String = {
 
-    val cityReg = "(?<=\\<td\\>City\\</td\\>\\<td\\>).+(?=\\</td\\>".r
+    // val cityReg = "(?<=\\<td\\>City\\</td\\>\\<td\\>).{1,20}(?=\\</td\\>".r
 
-    val xml: String = cityReg.findFirstIn(page).getOrElse("Connection failed.")
+    val splitOne = Try(page.split("""<td>City</td><td>""")(1)).getOrElse("Failed")
+    val xml = Try(splitOne.split("""</td>""")(0)).getOrElse("Failed")
+    // val xml: String = cityReg.findFirstIn(page).getOrElse("Connection failed.")
 
     return xml
   } // END parseCity()
@@ -85,10 +97,11 @@ class WhoIs(ip: String) {
   /** Grab postal code from XML */
   private[this] def parsePost(page: String): String = {
 
-    //
-    val postReg = "\\<td\\>Postal\\s+Code\\</td\\>\\<td\\>.+\\</td\\>".r
+    // val postReg = "\\<td\\>Postal\\s+Code\\</td\\>\\<td\\>.{1,20}\\</td\\>".r
 
-    val xml: String = postReg.findFirstIn(page).getOrElse("Connection failed.")
+    val splitOne = Try(page.split("""Code</td><td>""")(1)).getOrElse("Failed")
+    val xml = Try(splitOne.split("""</td>""")(0)).getOrElse("Failed")
+    // val xml: String = postReg.findFirstIn(page).getOrElse("Connection failed.")
 
     return xml
   } // END parsePost()
@@ -96,10 +109,12 @@ class WhoIs(ip: String) {
   /** Grab country from XML */
   private[this] def parseCountry(page: String): String = {
 
-    val countryReg = "(?<=\\<td\\>Country\\</td\\>\\<td\\>).+(?=\\</td\\>)".r
+    // val countryReg = "(?<=\\<td\\>Country\\</td\\>\\<td\\>).{1,20}(?=\\</td\\>)".r
 
+    val splitOne = Try(page.split("""<td>Country</td><td>""")(1)).getOrElse("Failed")
+    val xml = Try(splitOne.split("""</td>""")(0)).getOrElse("Failed")
     // <td>Country</td><td>US</td>
-    val xml: String = countryReg.findFirstIn(page).getOrElse("Connection failed.")
+    // val xml: String = countryReg.findFirstIn(page).getOrElse("Connection failed.")
 
     //val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
     //val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
@@ -111,8 +126,12 @@ class WhoIs(ip: String) {
   private[this] def parseState(page: String): String = {
 
     // <td>State/Province</td><td>CA</td>
-    val stateReg = "(?<=\\<State/{Province\\</td\\<td\\>).+(?=/td\\>)".r
-    val xml: String = stateReg.findFirstIn(page).getOrElse("Connection failed.")
+    // val stateReg = "(?<=<State/Province\\</td\\<td>)(?=/td>).{1,20}".r
+
+    val splitOne = Try(page.split("""<td>State/Province</td><td>""")(1)).getOrElse("Failed")
+    val xml = Try(splitOne.split("""</td>""")(0)).getOrElse("Failed")
+
+    // val xml: String = stateReg.findFirstIn(page).getOrElse("Connection failed.")
 
     return xml
   } // END parsePost()
@@ -121,21 +140,29 @@ class WhoIs(ip: String) {
   private[this] def parseName(page: String): String = {
 
     // <td>Name</td><td>MARKETO</td>
-    val nameReg = """(?<=<td>Name</td><td>).+(?=</td>)""".r
+    // val nameReg = """(?<=<td>Name</td><td>)(?=</td>).{1,20}""".r
 
-    val xml: String = nameReg.findFirstIn(page).getOrElse("Connection failed.")
+    val splitOne = Try(page.split("""<td>Name</td><td>""")(1)).getOrElse("Failed")
+    val xml = Try(splitOne.split("""</td>""")(0)).getOrElse("Failed")
+
+    // val xml: String = nameReg.findFirstIn(page).getOrElse("Connection failed.")
 
     return xml
   } // END parseCity()
 
   /** Grab street from XML */
   private[this] def parseStreet(page: String): String = {
-    val streetReg = "(?<=<td>Street</td><td>).+(?=<br>)".r
+    // val streetReg = "(?<=<td>Street</td><td>)(?=<br>).{1,20}".r
 
-    val xml: String = streetReg.findFirstIn(page).getOrElse("Connection failed.")
+    val splitOne = Try(page.split("""<td>Street</td><td>""")(1)).getOrElse("Failed")
+    val xml = Try(splitOne.split("""</td>""")(0)).getOrElse("Failed")
+    val finalX = Try(xml.split("""<br>""")(0)).getOrElse("Failed")
 
-    println("\n\nPrinting parsed streets: " + xml)
-    return xml
+    // val xml: String = streetReg.findFirstIn(page).getOrElse("Connection failed.")
+
+    // println("\n\nPrinting parsed streets: " + finalX)
+
+    return finalX
   } // END parsePost()
 
   /** Grab URL for the next page so we can find info about IP address. */
@@ -143,23 +170,43 @@ class WhoIs(ip: String) {
 
     /** Grab xml content from first page */
 
-    val regex = """(?<=<td>Organization<.+\(<a\s+href=").+(?=")""".r
+      /*
+      <td>Organization</td><td>Microsoft Corporation
+                        (<a href="https://whois.arin.net/rest/org/MSFT.html">MSFT</a>)
+                    </td>
+
+       */
+
+    // val regex = "(?<=<td>Organization<.+[\r\n].{0,20}\\(<a\\s+href=\").+(?=\")".r
 
     // "(?<=\\<).*(?=\\>)".r
     // <td>Net Range</td><td>131.107.0.0 - 131.107.255.255</td>
 
+    println("Performing first split.\n")
+    val firstSplit = Try(page.split("""Organization""")(1)).getOrElse("Split fail")
+    println("Performing second split.\n")
+    val secondSplit = Try(firstSplit.split('\"')(1)).getOrElse("Split fail")
+    val href = Try(secondSplit.split('\"')(0)).getOrElse("Split fail")
+
+    // println("Finished splitting href. It contains " + href)
+
     // Grab net
-    val netReg = """(?<=<Net\s+Range</td><td>).+(?=>)""".r
+    // val netReg = "(?<=Net\\s+Range</td\\>\\<td\\>)(?=\\>).+".r
 
-    val xml: String = regex.findFirstIn(page).getOrElse("Connection failed.")
+    // val xml: String = regex.findFirstIn(page).getOrElse("Connection failed.")
 
-    println("\n\nPrint address range: " + xml)
+    val range = Try(page.split("""Range</td><td>""")(1)).getOrElse("Connection failed.")
+    println("Printing split one result: " + range)
+    val finalRange = Try(range.split("""</td>""")(0)).getOrElse("Connection failed.")
 
-    val addr = netReg.findFirstIn(page).getOrElse("Connection failed.")
-    
-    println("\n\nPrinting Address Range: " + addr)
+    // val addr = Try(range.split('>')(0)).getOrElse("Connection failed.")
+    // val addr = netReg.findFirstIn(page).getOrElse("Connection failed.")
 
-    return (xml, addr)
+    // println("Printing split two result: " + finalRange)
+    // println("\n\nPrint next URL: " + href)
+    // println("\n\nPrinting Address Range: " + finalRange)
+
+    return (href.trim, finalRange.trim)
   } // END parsePage()
 
   /** Get web page */
