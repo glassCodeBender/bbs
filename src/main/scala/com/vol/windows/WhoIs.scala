@@ -33,33 +33,34 @@ class WhoIs(ip: String) {
 
     val url = "http://whois.arin.net/rest/ip/" + ip
 
-    val page = grabPage(url, connectTimeOut, readTimeout, request)
+    val page = Try(grabPage(url, connectTimeOut, readTimeout, request)).getOrElse("The First Page Failed")
 
     println("Printing page 1 content...\n")
-    println(page)
+   // println(page)
 
-    val page1Info = parsePageUrl(page)
+    val (url2, netRange): (String, String) = parsePageUrl(page)
 
     println("Printing next URL...\n")
-    page1Info.foreach(println)
+    println(url2)
+    println("Printing IP range...\n")
+    println(netRange)
 
-    val infoPage = Try(grabPage(page1Info(0), connectTimeOut, readTimeout, request))
+    val infoPage = Try(grabPage(url2, connectTimeOut, readTimeout, request))
       .getOrElse("Connection to second page failed...")
 
     println("Printing second page content...\n")
     println(infoPage)
 
-    /** Stores start ip address and end ip address */
-    val addressRange: String = page1Info(1) + "-" + page1Info(2)
 
     val ipInfo: Vector[String] = parseInfo(infoPage)
-    val fullUrl: String = page1Info(0) + ".html"
+    val fullUrl: String = url2 + ".html"
 
-    return PageInfo(ipInfo(0), ipInfo(2), ipInfo(3), ipInfo(1), ipInfo(5), ipInfo(4), addressRange, fullUrl)
+    return PageInfo(ipInfo(0), ipInfo(2), ipInfo(3), ipInfo(1), ipInfo(5), ipInfo(4), netRange, fullUrl)
 
   } // END query()
 
   private[this] def parseInfo(page: String): Vector[String] = {
+
 
     val city: String = parseCity(page)
     val post: String = parsePost(page)
@@ -73,101 +74,92 @@ class WhoIs(ip: String) {
 
   /** Grab city from XML */
   private[this] def parseCity(page: String): String = {
-    val cityReg = "<city.+city>".r
+
+    val cityReg = "(?<=\\<td\\>City\\</td\\>\\<td\\>).+(?=\\</td\\>".r
 
     val xml: String = cityReg.findFirstIn(page).getOrElse("Connection failed.")
 
-    val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
-
-    return lastSplit
+    return xml
   } // END parseCity()
 
   /** Grab postal code from XML */
   private[this] def parsePost(page: String): String = {
-    val postReg = "<postalCode.+postalCode>".r
+
+    //
+    val postReg = "\\<td\\>Postal\\s+Code\\</td\\>\\<td\\>.+\\</td\\>".r
 
     val xml: String = postReg.findFirstIn(page).getOrElse("Connection failed.")
 
-    val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
-
-    return lastSplit
+    return xml
   } // END parsePost()
 
   /** Grab country from XML */
   private[this] def parseCountry(page: String): String = {
-    val countryReg = "<code3.+code3>".r
 
+    val countryReg = "(?<=\\<td\\>Country\\</td\\>\\<td\\>).+(?=\\</td\\>)".r
+
+    // <td>Country</td><td>US</td>
     val xml: String = countryReg.findFirstIn(page).getOrElse("Connection failed.")
 
-    val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
+    //val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
+    //val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
 
-    return lastSplit
+    return xml
   } // END parseCity()
 
   /** Grab state from XML */
   private[this] def parseState(page: String): String = {
-    val stateReg = "<iso3166\\-.+iso3166\\-2>".r
+
+    // <td>State/Province</td><td>CA</td>
+    val stateReg = "(?<=\\<State/{Province\\</td\\<td\\>).+(?=/td\\>)".r
     val xml: String = stateReg.findFirstIn(page).getOrElse("Connection failed.")
 
-    val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
-
-    return lastSplit
+    return xml
   } // END parsePost()
 
   /** Grab name from XML */
   private[this] def parseName(page: String): String = {
-    val nameReg = "handle><name.+name>".r
+
+    // <td>Name</td><td>MARKETO</td>
+    val nameReg = """(?<=<td>Name</td><td>).+(?=</td>)""".r
 
     val xml: String = nameReg.findFirstIn(page).getOrElse("Connection failed.")
-    val splitX: String = Try(xml.split('<')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('>')(1)).getOrElse("Connection failed.")
-    val finalSplit: String = Try(lastSplit.split('<')(0)).getOrElse("Connection failed.")
 
-    return finalSplit
+    return xml
   } // END parseCity()
 
   /** Grab street from XML */
   private[this] def parseStreet(page: String): String = {
-    val streetReg = "line.+streetAddress>".r
+    val streetReg = "(?<=<td>Street</td><td>).+(?=<br>)".r
 
     val xml: String = streetReg.findFirstIn(page).getOrElse("Connection failed.")
-    val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
 
-    return lastSplit
+    println("\n\nPrinting parsed streets: " + xml)
+    return xml
   } // END parsePost()
 
   /** Grab URL for the next page so we can find info about IP address. */
-  private[this] def parsePageUrl(page: String): Vector[String] = {
+  private[this] def parsePageUrl(page: String): (String, String) = {
 
     /** Grab xml content from first page */
 
-    /** Grab Url page */
-    val regex = "<orgRef.+orgRef>".r
-    /** Grab start ip */
-    val startReg = "<startAddress.+startAddress>".r
-    /** Grab end ip */
-      val endReg = "<endAddress.+endAddress>".r
+    val regex = """(?<=<td>Organization<.+\(<a\s+href=").+(?=")""".r
+
+    // "(?<=\\<).*(?=\\>)".r
+    // <td>Net Range</td><td>131.107.0.0 - 131.107.255.255</td>
+
+    // Grab net
+    val netReg = """(?<=<Net\s+Range</td><td>).+(?=>)""".r
 
     val xml: String = regex.findFirstIn(page).getOrElse("Connection failed.")
 
-    val splitX: String = Try(xml.split('>')(1)).getOrElse("Connection failed.")
-    val lastSplit: String = Try(splitX.split('<')(0)).getOrElse("Connection failed.")
+    println("\n\nPrint address range: " + xml)
 
-    val xmlStart = startReg.findFirstIn(page).getOrElse("Connection failed.")
-    val xmlEnd = endReg.findFirstIn(page).getOrElse("Connection failed.")
+    val addr = netReg.findFirstIn(page).getOrElse("Connection failed.")
+    
+    println("\n\nPrinting Address Range: " + addr)
 
-    val splitBegin = Try(xmlStart.split('>')(1)).getOrElse("Connection failed.")
-    val start = Try(splitBegin.split('<')(0)).getOrElse("Connection failed.")
-
-    val splitEnd: String = Try(xmlEnd.split('>')(1)).getOrElse("Connection failed.")
-    val end: String = Try(splitEnd.split('<')(0)).getOrElse("Connection failed.")
-
-    return Vector(lastSplit, start, end)
+    return (xml, addr)
   } // END parsePage()
 
   /** Get web page */
@@ -183,7 +175,7 @@ class WhoIs(ip: String) {
 
     val inputStream = connection.getInputStream
     val webPage: String = io.Source.fromInputStream(inputStream).mkString
-    if (inputStream == null) inputStream.close
+    if (inputStream == null) inputStream.close()
 
     return webPage
   } // END grabPage()
