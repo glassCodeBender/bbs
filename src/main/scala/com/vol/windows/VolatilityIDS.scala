@@ -11,8 +11,13 @@ import scala.io.Source
 import sys.process._
 import java.io.File
 import java.util.Calendar
+
 import com.bbs.vol.processtree._
+
 import scala.collection.immutable.TreeMap
+import com.bbs.vol.windows.StringOperations._
+
+import scala.util.Try
 
 object VolatilityIDS {
   def main( args: Array[String] ): Unit = {
@@ -20,6 +25,10 @@ object VolatilityIDS {
     // Need to read in user input from a config file.
 
     val (os, memFile) = parseConfig()
+
+    /**
+      * Check and make sure valid file extension
+      */
 
     // when we read in the config file, we need to make sure memFile doesn't have spaces in it.
     // If it does, we need to add quotes around it.
@@ -41,7 +50,7 @@ object VolatilityIDS {
     val kdbg = checkKDBG( memFile )
 
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
-    val dumpDir = mkDir( os )
+    val dumpDir = mkDir( memFile )
 
     val discovery = new VolDiscoveryWindows( memFile, os, dumpDir )
 
@@ -86,19 +95,19 @@ object VolatilityIDS {
     if ( cleanSplit.size == 4 ) {
       println( "\n\nWelcome to the Big Brain Security Volatile IDS! \n" +
         "\nReading bbs_config.txt file to determine your settings...\n\n" +
-        "\nThe configuration file was successfully read...\n\nRunning the program...\n\n" )
+        "\nThe configuration file was successfully read...\n\nRunning the program..." )
     }  else System.exit( 1 )
 
     return (cleanSplit(1), cleanSplit(3))
   } // END parseConfig()
 
   /** Creates a directory where we'll store log, prefetch, and pcap info in txt files */
-  private[windows] def mkDir(os: String): String = {
+  private[windows] def mkDir(memFile: String): String = {
     val cal = Calendar.getInstance()
     val date = {
       cal.get(Calendar.MONTH) + "-" + cal.get(Calendar.DATE) + "_" + cal.get(Calendar.HOUR) + cal.get(Calendar.MINUTE)
     }
-    val dirName = System.getProperty("user.dir") + "/" + os + date
+    val dirName = System.getProperty("user.dir") + "/" + memFile + date
     val dir = new File(dirName)
     // val checkCreation: Boolean = dir.mkdir()
 
@@ -108,9 +117,9 @@ object VolatilityIDS {
       println("\n\n\nWe failed to create a directory for lots of helpful information. Check and make sure\n" +
         s"the directory $dirName doesn't already exist.\n\n")
     }
-    val shortDirName = os + date
-    return shortDirName
+    val shortDirName = memFile + date
 
+    return shortDirName
   } // END mkDir()
 
   /** Determines where output will be stored. */
@@ -136,7 +145,7 @@ object VolatilityIDS {
       "If information about the image does not print to the console in 2-3 minutes, it is likely you made an error while " +
       "extracting the memory, a rootkit prevented you from dumping the memory, or the image file is not in the volatility-master directory.\n\n" +
       "To test your image, open the console and type the following:\n\t" +
-      s">> python vol.py $memFile imageinfo\n\n" )
+      s">> python vol.py -f $memFile imageinfo\n\n" )
 
     val imageInfo: Option[String] = Some( s"python vol.py -f $memFile imageinfo".!!.trim )
 
@@ -190,20 +199,64 @@ object VolatilityIDS {
     "EXPLORER.EXE" -> " This must always be running in the background. It’s a user interface process that runs the windows graphical shell for the desktop, task bar, and Start menu.",
     "IEXPLORE.EXE" -> " Internet Explorer browser. But why are you using it unless it’s for a site that doesn’t work in any other browser? Use Firefox instead.",
     "LSASS.EXE" -> "Security Authority Service is a Windows security related system process for handling local security and login policies.",
-    "NC.EXE" -> "Netcat listener. Commonly used by hackers to create backdoors. Also used by advanced computer users for sharing files and other tasks.",
+    "NC.EXE" -> "Netcat listener. Commonly used by hackers to create backdoors. Also used by for sharing files and other tasks.",
     "NAVAPSVC.EXE" -> "These are Symantec’s North AnvtiVirus processes. They or whatever virus program you use should run all the time.",
     "NVSRVC32.EXE" -> "These are Symantec’s North AnvtiVirus processes. They or whatever virus program you use should run all the time.",
     "NAVAPW32.EXE" -> "These are Symantec’s North AnvtiVirus processes. They or whatever virus program you use should run all the time.",
     "REALSCHED.EXE" -> "RealNetworks Scheduler is not an essential process. It checks for updates for RealNetworks products. It can be safely disabled.",
     "RUNDLL32.EXE" -> "A system process that executes DLLs and loads their libraries.",
     "SAVSCAN.EXE" -> "Nortons AntiVirus process.",
+
+      "SEARCHINDEXER.EXE" -> "Standard process",
+      "WMIPRVSE.EXE" -> "Standard",
+      "TASKLIST.EXE" -> "Executable used to grab Windows processes",
+      "SEARCHUI.EXE" -> "Standard",
+      "SKYPEHOST.EXE" -> "Skype",
+      "ONEDRIVE.EXE" -> "Microsoft OneDrive",
+      "MSASCUIL.EXE" -> "Standard",
+      "SHELLEXPERIENCEHOST.EXE" -> "Standard",
+      "RUNTIMEBROKER.EXE" -> "Standard",
+      "NISSRV.EXE" -> "Standard",
+      "BACKGROUNDTASKHOST.EXE" -> "Standard",
+      "POWERSHELL.EXE" -> "Windows Powershell",
+      "VMTOOLSD.EXE" -> "VMware Tools.",
+      "VMACTHLP.EXE" -> "VMware Physical Disk Helper",
+      "DWM.EXE" -> "Standard",
+      "MICROSOFTEDGE.EXE" -> "Microsoft Edge",
+      "MICROSOFTEDGECP.EXE" -> "Microsoft Edge",
+      "INSTALLAGENT.EXE" -> "",
+      "BROWSER_BROKER.EXE" -> "Used for web browsers",
+      "SNIPPINGTOOL.EXE" -> "Windows Snipping Tool",
+      "HXCALENDARAPPIMM.EXE" -> "Windows Calendar",
+      "HXTSR.EXE" -> "Windows Calendar",
+      "CALCULATOR.EXE" -> "Windows Calculator",
+      "WINDOWSCAMERA.EXE" -> "Windows Webcam Program",
+      "ONENOTEIM.EXE" -> "Microsoft OneNote",
+      "SOLITAIRE.EXE" -> "Microsoft Solitaire",
+      "GAMEBARPRESENCEWRITER.EXE" -> "Used for Microsoft games like Solitaire",
+      "MUSIC.UI.EXE" -> "Groove Music",
+      "MICROSOFT.PHOTOS.EXE" -> "Microsoft Photos",
+      "AUDIODG.EXE" -> "Microsoft Audio",
+      "MAPS.EXE" -> "Microsoft maps",
+      "SOUNDREC.EXE" -> "Microsoft Sound Recorder",
+      "WINSTORE.APP.EXE" -> "Microsoft Application Store",
+      "WMPLAYER.EXE" -> "Windows Media Player",
+      "SYNTPENH.EXE" -> "Synaptics TouchPad 64 bit enhancements",
+      "SYNTPHELPER.EXE" -> "Synaptics Pointing Device Helper",
+      "SIHOST.EXE" -> "Microsoft Shell Infrastructure Host",
+      "CONHOST.EXE" -> "Console Window Host",
+      "MSMPENG.EXE" -> "Windows Defender Background Tasks",
+      "TASKHOSTW.EXE" -> "Starts Windows services when OS starts up. For Windows 10 only.",
+      "TASKHOSTEX.EXE" -> "Starts Windows services when OS starts up. For Windows 8 only.",
+      "TASKHOST.EXE" -> "Starts Windows services when OS starts up. For Windows 7 only.",
+
     "SERVICES.EXE" -> "An essential process that manages the starting and stopping of services including the those in boot up and shut down. Do not terminate it.",
     "SMSS.EXE" -> " Session Manager SubSystem is a system process that is a central part of the Windows operating system.",
     "SPOOLSV.EXE" -> " Microsoft printer spooler service handles local printer processes. It’s a system file.",
     "SVCHOST.EXE" -> " You may have more than six appearances of this process or less. It’s there multiple times to handle processes executed from DLLs. Leave it there.",
     "SYSTEM" -> " This is a file that stores information related to local hardware settings in the registry under ‘HKEY_LOCAL_MACHINE’. Kill it and kiss your PC’s stability bye bye.",
-    "SYSTEM IDELE PROCESS" -> " calculates the amount of CPU currently in use by applications. This won’t go away no matter how hard you try. Don’t try it, OK?",
-    "TASKMGR.EXE" -> " Appears when you press Ctrl+Alt+Del.",
+    "SYSTEM IDELE PROCESS" -> "Calculates the amount of CPU currently in use by applications. This won’t go away no matter how hard you try. Don’t try it, OK?",
+    "TASKMGR.EXE" -> "Task Manager. Appears when you press Ctrl+Alt+Del.",
     "WDFMGR.EXE" -> " Windows Driver Foundation Manager is part of Windows media player 10 and newer. Better not to stop the process.",
     "WINLOGON.EXE" -> " Handles the login and logout processes. It’s essential.",
     "WINWORD.EXE" -> " Microsoft word.",
@@ -278,42 +331,41 @@ object ProcessDescription {
     var result = new TreeMap[String, String]()
 
     if (4848 until 6575 contains value) result = Proc00AK.get()
-    if (6585 until 6682 contains value) result = ProcAUBR.get()
-    if (6683 until 6773 contains value) result = ProcBSCI.get()
-    if (6774 until 6778 contains value) result = ProcCJCN.get()
-    if (6779 until 6787 contains value) result = ProcCOCW.get()
-    if (6787 until 6875 contains value) result = ProcCXDK.get()
-    if (6876 until 6973 contains value)  result = ProcDLEI.get()
-     if (6974 until 7072 contains value) result = ProcEJFH.get()
-     if (7073 until 7279 contains value) result = ProcFIHO.get()
-     if (7280 until 7367 contains value) result = ProcHPIC.get()
-     if (7368 until 7378 contains value) result = ProcIDIN.get()
-     if (7379 until 7576 contains value) result = ProcIOKL.get()
-     if (7577 until 7676 contains value) result = ProcKMLL.get()
-     if (7677 until 7766 contains value) result = ProcLMMB.get()
-     if (7767 until 7775 contains value) result = ProcMCMK.get()
-     if (7776 until 7788 contains value) result = ProcMLMX.get()
-     if (7789 until 7880 contains value) result = ProcMYNP.get()
-     if (7881 until 7982 contains value) result = ProcNQOR.get()
-     if (7983 until 8070 contains value) result = ProcOSPF.get()
-     if (8071 until 8082 contains value) result = ProcPGPR.get()
-     if (8083 until 8265 contains value) result = ProcPRRA.get()
-     if (8266 until 8280 contains value) result = ProcRBRP.get()
-     if (8281 until 8367 contains value) result = ProcRRSC.get()
-     if (8368 until 8375 contains value) result = ProcSDSK.get()
-     if (8376 until 8383 contains value) result = ProcSLSS.get()
-     if (8384 until 8466 contains value) result = ProcSTTB.get()
-     if (8467 until 8483 contains value) result = ProcTCTS.get()
-     if (8484 until 8667 contains value) result = ProcTTVC.get()
-     if (8668 until 8766 contains value) result = ProcVDWB.get()
-     if (8767 until 8782 contains value) result = ProcWCWR.get()
-     if (8783 until 9090 contains value) result = ProcWSZZ.get()
+    else if (6585 until 6682 contains value) result = ProcAUBR.get()
+    else if (6683 until 6773 contains value) result = ProcBSCI.get()
+    else if (6774 until 6778 contains value) result = ProcCJCN.get()
+    else if (6779 until 6787 contains value) result = ProcCOCW.get()
+    else if (6787 until 6875 contains value) result = ProcCXDK.get()
+    else if (6876 until 6973 contains value) result = ProcDLEI.get()
+    else if (6974 until 7072 contains value) result = ProcEJFH.get()
+    else if (7073 until 7279 contains value) result = ProcFIHO.get()
+    else if (7280 until 7367 contains value) result = ProcHPIC.get()
+    else if (7368 until 7378 contains value) result = ProcIDIN.get()
+    else if (7379 until 7576 contains value) result = ProcIOKL.get()
+    else if (7577 until 7676 contains value) result = ProcKMLL.get()
+    else if (7677 until 7766 contains value) result = ProcLMMB.get()
+    else if (7767 until 7775 contains value) result = ProcMCMK.get()
+    else if (7776 until 7788 contains value) result = ProcMLMX.get()
+    else if (7789 until 7880 contains value) result = ProcMYNP.get()
+    else if (7881 until 7982 contains value) result = ProcNQOR.get()
+    else if (7983 until 8070 contains value) result = ProcOSPF.get()
+    else if (8071 until 8082 contains value) result = ProcPGPR.get()
+    else if (8083 until 8265 contains value) result = ProcPRRA.get()
+    else if (8266 until 8280 contains value) result = ProcRBRP.get()
+    else if (8281 until 8367 contains value) result = ProcRRSC.get()
+    else if (8368 until 8375 contains value) result = ProcSDSK.get()
+    else if (8376 until 8383 contains value) result = ProcSLSS.get()
+    else if (8384 until 8466 contains value) result = ProcSTTB.get()
+    else if (8467 until 8483 contains value) result = ProcTCTS.get()
+    else if (8484 until 8667 contains value) result = ProcTTVC.get()
+    else if (8668 until 8766 contains value) result = ProcVDWB.get()
+    else if (8767 until 8782 contains value) result = ProcWCWR.get()
+    else if (8783 until 9090 contains value) result = ProcWSZZ.get()
 
     return result
   } // END matchProcess()
 
 } // END ProcessDescription object
-
 
 /** Contains info that will help determine which info to print in report and the risk the system faces. */
 final case class RiskRating(riskRating: Integer)
@@ -330,6 +382,12 @@ object FindSuspiciousProcesses{
       * Get info from Discovery case class
       */
 
+    /*********************************************************
+      * Console commands should be given risk rating in a map.
+      ********************************************************/
+
+      // YaraParseString(rule, proc, str)
+      // YaraParse(classification, rule, owner, offset)
     val proc: Vector[ProcessBbs] = disc.proc._1
     /** callbacks, hiddenModules, timers, deviceTree, orphanThread, found */
     val rootkit: RootkitResults = disc.rootkit
@@ -339,6 +397,8 @@ object FindSuspiciousProcesses{
     val (userReg, sysReg) = disc.registry
     /** svcStopped, suspCmds */
     val sysSt: SysState = disc.sysState
+
+    val net: Vector[NetConnections] = disc.net._1
 
     /**
       * Get info from ProcessBrain
@@ -357,6 +417,14 @@ object FindSuspiciousProcesses{
     val webshells: Vector[YaraParse] = yarSuspicious.webshells
     val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
     val suspStrs: Vector[YaraParseString] = yarSuspicious.suspStrings
+    val ip: Vector[YaraParseString] = yaraObj.ip
+    // Compare against top 10 malicious IPs -> isc.sans.edu/top10.php
+
+    /**
+      * Need to look at the parents of hidden processes. Is it cmd.exe or powershell.exe?
+      */
+
+    ip
 
     /**
       * TO DO:
@@ -390,5 +458,140 @@ object FindSuspiciousProcesses{
       */
 
   } // END run()
+
+  private[this] def checkPorts(yaraVec: Vector[YaraParseString], netVec: Vector[NetConnections]) = {
+    /**
+      * YaraParseString
+      * pid: String,
+      * localIP: String,
+      * destIP: String,
+      * destLocal: Boolean = true,  // Is the destination IP address local?
+      * vnc: Boolean
+      */
+
+      /** pid -> numbers found with yarascan that we might be able to match to a port number */
+    val localYar: Vector[(String, String)] = yaraVec.map(x => (x.proc, x.str.replaceAll("\\.", "")))
+    val destYar: Vector[(String, String)] = yaraVec.map(x => (x.proc, x.str.replaceAll("\\.", "")))
+    val yarConcat = localYar ++: destYar
+
+    val connDestPorts: Vector[(String, String)] = {
+      netVec.map(x => (x.pid, Try(x.destIP.splitLast(':')(1)).getOrElse("").trim))
+    }
+
+    val connSrcPorts: Vector[(String, String)] = {
+      netVec.map(x => (x.pid, Try(x.localIP.splitLast(':')(1)).getOrElse("").trim))
+    }
+
+    val netConcat = connDestPorts ++: connSrcPorts
+    // Need to filter to only include unique ports
+
+    /** Both are Vector[Vector[String]] (0=pid, 1=port, 2=description)*/
+    val (netFound, yarFound) = searchPorts(yarConcat, netConcat)
+
+    netFound
+
+  } // END checkPorts()
+
+  /** Given an integer value based on findings that we'll use to determine system risk rating. */
+  private[this] def riskValue(yarVec: Vector[String], netVec: Vector[String]): Int = {
+
+    var riskNo = 0
+
+    // After checking netVec, we need to remove ports that are in both yarVec and netVec
+
+    return riskNo
+  } // END riskValue()
+
+  private[this] def searchPorts(yarVec: Vector[(String, String)], netVec: Vector[(String, String)]):
+                                                        (Vector[Vector[String]], Vector[Vector[String]]) = {
+
+    /** Vector[Vector(pid, portNo, Description)]*/
+    val yarTargetsFound: Vector[Vector[String]] = for{
+      tup <- yarVec
+    } yield Vector(tup._1, tup._2, getCommonTargetPort(tup._1))
+
+    val yarProbsFound: Vector[Vector[String]] = for{
+      tup <- netVec
+    } yield Vector(tup._1, tup._2, getPortRisk(tup._2))
+
+    /** Filter out ports that did not match. */
+    val filterYarTargets: Vector[Vector[String]] = yarTargetsFound.filterNot(x => x(2) == "None")
+    val filterYarProbs: Vector[Vector[String]] = yarProbsFound.filterNot(x => x(2) == "None")
+
+    return (filterYarTargets, filterYarProbs)
+  } // END searchPorts
+
+  private[this] def getCommonTargetPort(portNo: String): String = {
+
+    // Check for the following ports
+    val commonTargetPorts = Map("20" -> "ftp", "5060" -> "SIP", "554" -> "rtsp", "17185" -> "soundsvirtual",
+      "3369" -> "satvid-datalnk", "1883" -> "IBM MQSeries Scada", "333" -> "Texas Security", "2080" -> "autodesk-nlm",
+      "5432" -> "postgres database server", "4289" -> "VRLM Multi User System",
+      "3377" -> "Cogsys Network License Manager", "47808" -> "bacnet", "4899" -> "Remote Administrator Default Port",
+      "500" -> "VPN Key Exchange", "3366" -> "Creative Partner", "3339" -> "anet-l OMF data l",
+      "563" -> "nntp over TLS protocol", "2003" -> "cfingerd GNU Finger", "3370" -> "satvid Video Data Link",
+      "222" -> "Berkeley rshd with SPX auth", "3281" -> "sysopt", "3368" -> "satvid Video Data Link",
+      "7070" -> "ARCP", "3421" -> "Bull Apprise Portmapper", "4500" -> "sae-urn",
+      "16992" -> "Intel AMT remote managment", "5800" -> "VNC", "3277" -> "awg proxy",
+      "502" -> "asl-appl-proto", "212" -> "SCIENTA-SSDB", "3378" -> "WSICOPY", "3459" -> "Eclipse 2000 Trojan",
+      "3328" -> "Eaglepoint License Manager", "5984" -> "couchdb", "3360" -> "kv-server", "3348" -> "Pangolin Laser",
+      "3052" -> "APCPCNS", "3343" -> "MS Cluster Net", "44444" -> "Prosiak Trojan", "3286" -> "E-Net",
+      "22222" -> "Donald Dick Trojan", "3353" -> "fatpipe", "3355" -> "Ordinox Database", "513" -> "Grlogin Trojan"
+    )
+
+    /** Need to make sure this returns something if not found. */
+    return Try(commonTargetPorts(portNo)).getOrElse("None")
+  } // END getCommonTargetPort()
+
+  /** Pass a port number to check risk associated w/ port number */
+  private[this] def getPortRisk(portNo: String): String = {
+
+    /** Map of ports commonly used by hackers. List should include more ports.
+      * Values based on SANS port report https://isc.sans.edu/port
+      */
+    val probPorts = TreeMap[String, String]("4946" -> "high", "4344" -> "medium", "4331" -> "medium", "2525" -> "high",
+      "513" -> "critical", "2087" -> "medium", "5060" -> "high", "1234" -> "high", "3097" -> "medium",
+      "30000" -> "critical", "54321" -> "critical", "33333" -> "critical", "5800" -> "medium", "3459" -> "critical",
+      "44444" -> "critical", "22222" -> "critical", "491" -> "medium",
+      "3575" -> "critical", "3573" -> "high", "3569" -> "high", "3566" -> "critical", "3558" -> "high",
+      "3552" -> "high", "3551" -> "high", "3545" -> "high", "3509" -> "high", "3074" -> "low", "2702" -> "critical",
+      "2120" -> "medium", "1656" -> "low", "1613" -> "critical", "655" -> "medium", "3074" -> "low",
+      "1749" -> "medium", "2120" -> "low", "2273" -> "low", "3558" -> "high", "3571" -> "high", "4344" -> "low",
+      "4946" -> "medium", "5355" -> "critical", "5827" -> "low", "6882" -> "medium", "6957" -> "low", "7834" -> "low",
+      "9343" -> "low", "10034" -> "low", "10070" -> "critical", "11460" -> "low", "10550" -> "low", "11786" -> "low",
+      "11868" -> "low", "12632" -> "low", "13600" -> "low", "14427" -> "low", "14501" -> "medium", "14502" -> "medium",
+      "14503" -> "medium", "14504" -> "medium", "14506" -> "medium", "14518" -> "medium", "14519" -> "medium",
+      "14546" -> "medium", "14547" -> "medium", "14559" -> "medium", "14562" -> "medium", "14576" -> "medium",
+      "14580" -> "medium", "14581" -> "medium", "14582" -> "medium", "14585" -> "low", "14814"  -> "low",
+      "14955" -> "medium", "15714" -> "low", "16183" -> "low","17225" -> "low", "17500" -> "critical",
+      "17730" -> "medium", "18170" -> "low", "19120" -> "low", "19451" -> "low", "19820" -> "low", "19948" -> "low",
+      "19999" -> "low", "20012"  -> "low", "20707" -> "low", "21027" -> "critical", "21646" -> "low", "21715" -> "low",
+      "22238" -> "low", "22328" -> "low", "24404" -> "low", "24542" -> "low", "24863" -> "low", "25441" -> "low",
+      "26431" -> "low", "26858" -> "low", "27719" -> "low", "27745" -> "low", "27969" -> "low", "28607" -> "low",
+      "29294" -> "low", "29440" -> "high", "30516" -> "low", "31101" -> "high", "31695" -> "low", "31949" -> "low",
+      "32172" -> "low", "32414" -> "critical", "33063" -> "low", "33120" -> "low", "33331" -> "low", "33978" -> "low",
+      "34425" -> "low", "34518" -> "low", "34751" -> "low", "34885" -> "low", "35166" -> "low", "35366" -> "low",
+      "35393" -> "low", "35899" -> "low", "35902" -> "low", "36123" -> "critical", "36138" -> "low", "36181" -> "low",
+      "36289" -> "medium", "36538" -> "medium", "36620" -> "high", "36787" -> "low", "36817" -> "low", "37087" -> "low",
+      "37558" -> "low", "38250" -> "low", "38418" -> "low", "38610" -> "low", "38857" -> "low", "38972" -> "medium",
+      "38979" -> "low", "38972" -> "medium", "38982" -> "medium", "39203" -> "low", "39395" -> "medium",
+      "39571" -> "low", "39804" -> "medium", "40089" -> "low", "40297" -> "low", "40400" -> "low", "40483" -> "low",
+      "40778" -> "low", "40902" -> "low", "41712" -> "low", "41995" -> "medium", "42193" -> "low", "42866" -> "medium",
+      "43312" -> "medium", "43884" -> "low", "45827" -> "low", "45977" -> "low", "46573" -> "medium",
+      "47123" -> "medium", "47554" -> "low", "48392" -> "low", "49387" -> "low", "49438" -> "medium",
+      "49491" -> "low", "49792" -> "low", "50076" -> "low", "50086" -> "low", "50088" -> "medium", "51533" -> "high",
+      "51799" -> "low", "52622" -> "low", "52656" -> "high", "53773" -> "low", "54191" -> "low", "54256" -> "critical",
+      "54373" -> "low", "55733" -> "medium", "56168" -> "low", "57325" -> "low", "57621" -> "critical",
+      "57925" -> "medium", "58067" -> "low", "58085" -> "low", "58180" -> "low", "58231" -> "high", "58554" -> "low",
+      "58558" -> "medium", "58582" -> "low", "58838" -> "low", "58842" -> "low", "58975" -> "low", "59107" -> "medium",
+      "59134" -> "low", "49141" -> "low", "59163" -> "low", "59206" -> "medium", "59566" -> "low", "59707" -> "high",
+      "59789" -> "low", "59873" -> "low", "59912" -> "medium", "60527" -> "low", "61134" -> "medium", "61905" -> "high",
+      "62581" -> "low", "63656" -> "low", "63747" -> "low", "63800" -> "medium", "63867" -> "medium", "64076" -> "low",
+      "64549" -> "medium", "65285" -> "low", "350" -> "low", "577" -> "low", "857" -> "low",
+    ) // END probPorts treemap
+
+    return Try(probPorts(portNo)).getOrElse("None")
+  } // END getProbPort()
+
 
 } // END FindSuspiciousProcesses object
