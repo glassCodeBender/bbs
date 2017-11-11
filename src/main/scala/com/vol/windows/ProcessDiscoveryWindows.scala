@@ -12,8 +12,6 @@ import StringOperations._
   * DetectUnlinkedDLLs object
   */
 
-// import com.bigbrainsecurity.utils.nlp.StringOperations._
-
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import sys.process._
