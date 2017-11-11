@@ -11,13 +11,15 @@ import StringOperations._
   */
 
 // import com.bigbrainsecurity.utils.nlp.StringOperations._
+
+import com.bbs.vol.httpclient.{WhoIs, PageInfo}
 import java.io.File
 import java.util.Calendar
 
 import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
 import scala.util.Try
-import org.apache.commons.net.whois.WhoisClient
+// import org.apache.commons.net.whois.WhoisClient
 
 // import scala.collection.mutable
 import sys.process._
@@ -50,12 +52,12 @@ final case class SysState(svcOnePerLine: Vector[String], // Each service on one 
                     envVars: String )              // Full output of envars scan
 
 /** Stores all of the raw data we discovered. This class will be returned from main. */
-final case class Discovery(proc: (Vector[ProcessBbs], String),               // (All process info, processTree)
-                           sysState: SysState,                            // SysState
-                           net: (Vector[NetConnections], Vector[String]), // (connection Info, Whois Lookup)
-                           rootkit: RootkitResults,                       // RootkitResults
-                           remoteMapped: Vector[(String, String)],        // (pid -> RemoteMappedDrive Found)
-                           registry: (Vector[String], Vector[String])     // (User Registry, System Registry)
+final case class Discovery( proc: (Vector[ProcessBbs], String),               // (All process info, processTree)
+                            sysState: SysState,                            // SysState
+                            net: (Vector[NetConnections], Vector[PageInfo]), // (connection Info, Whois Lookup)
+                            rootkit: RootkitResults,                       // RootkitResults
+                            remoteMapped: Vector[(String, String)],        // (pid -> RemoteMappedDrive Found)
+                            registry: (Vector[String], Vector[String])     // (User Registry, System Registry)
                           )
 
 /**
@@ -150,7 +152,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
     //println(processScanResults._2) // Printing processtree
 
     /** Scan network connections */
-    val netScanResult : (Vector[NetConnections], Vector[String]) = NetScan.run(memFile, os)
+    val netScanResult : (Vector[NetConnections], Vector[PageInfo]) = NetScan.run(memFile, os)
     println("\n\nPrinting scan for network connections...\n\n")
     netScanResult._1.foreach(println)
     netScanResult._2.foreach(println)
@@ -532,7 +534,7 @@ final case class NetConnections( pid: String,
 
 /************************* Netscan Object *************************/
 object NetScan extends VolParse {
-  private[windows] def run( memFile: String, os: String ): (Vector[NetConnections], Vector[String]) = {
+  private[windows] def run( memFile: String, os: String ): (Vector[NetConnections], Vector[PageInfo]) = {
     // SKIPPING netscan for now.
     // val socketsAndConnections: Option[String] = Some( s"python vol.py -f $memFile --profile=$os netscan".!!.trim )
     // val netscanParse = parseOutputDropHead( socketsAndConnections.getOrElse( "" ) ).get
@@ -542,9 +544,8 @@ object NetScan extends VolParse {
 
     var whois = Vector[String]()
 
-    if(outsideConns.isEmpty) (conns, Vector[String]())
+    if(outsideConns.isEmpty) (conns, Vector[PageInfo]())
     else (conns, whoisLookup(outsideConns))
-
   } // END run()
 
   /** Scan finds both open and closed network connections */
@@ -594,21 +595,17 @@ object NetScan extends VolParse {
   } // END whoisLookup()
 
   /** Look up info about ip address from whois and return information. */
-  private[this] def getWhoIs(domainName: String): String = {
-
-    val whois = new WhoisClient()
-    val response = "\n\nNo Internet Connection Available. We could not perform a whois lookup for you."
+  private[this] def getWhoIs(ipAddr: String): PageInfo = {
 
     /** Need to pull IP address out of the full name w/ port number */
     // Used splitLast() from StringOperations to ensure compatibility w/ IPv6
-    val domainSplit: Array[String] = domainName.splitLast(':')
+    val ipSplit: Array[String] = ipAddr.splitLast(':')
 
+    val whois = new WhoIs(ipSplit(0))
+
+    val whoisResult = Try(whois.query()).getOrElse(PageInfo("Connection Failed.", "", "", "", "", "", "", ""))
     /** Try to connect to whois to find information about */
-    Try(whois.connect("https://www.ripe.net/")).getOrElse(println(response))
-
-    val whoisResult: String = Try(whois.query(domainSplit(0))).getOrElse("")
-
-    Try(whois.disconnect()).getOrElse("")
+    // Try(whois.connect("www.whois.arin.net")).getOrElse(println(response))
 
     return whoisResult
   } // END getWhoIs()
