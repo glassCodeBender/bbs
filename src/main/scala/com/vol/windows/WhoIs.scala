@@ -19,7 +19,7 @@ final case class PageInfo( ip: String,
     if (name == "Connection failed.")
       "Connection failed."
     else {
-      s"\nWhois Results for $url\nName: $name\nStreet: $street\nCity: $city\nState: $state\nPostal Code: $post\nCountry: $country\n" +
+      s"\nWhois Results for $ip\nName: $name\nStreet: $street\nCity: $city\nState: $state\nPostal Code: $post\nCountry: $country\n" +
         s"IP Address Range: $ipRange\nWhois Registration Info URL: $url" + "\n"
     }
   } // END toString()
