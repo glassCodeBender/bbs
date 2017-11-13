@@ -5,7 +5,7 @@ import java.net.{HttpURLConnection, URL}
 
 import scala.util.Try
 
-final case class PageInfo( ip: String, 
+final case class PageInfo( ip: String,
                            name: String,     // registered name
                            city: String,     // city
                            state: String,    // state
@@ -134,7 +134,7 @@ class WhoIs(ip: String) {
     val href = Try(secondSplit.split('\"')(0)).getOrElse("Split fail")
 
     val range = Try(page.split("""Range</td><td>""")(1)).getOrElse("Connection failed.")
-    println("Printing split one result: " + range)
+   //  println("Printing split one result: " + range)
     val finalRange = Try(range.split("""</td>""")(0)).getOrElse("Connection failed.")
 
     return (href.trim, finalRange.trim)
