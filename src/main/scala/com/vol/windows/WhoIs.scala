@@ -1,12 +1,11 @@
 package com.bbs.vol.httpclient
 
 import java.net.{HttpURLConnection, URL}
-
 // import com.bbs.vol.windows.StringOperations._
 
 import scala.util.Try
 
-final case class PageInfo( ip: String,
+final case class PageInfo( ip: String, 
                            name: String,     // registered name
                            city: String,     // city
                            state: String,    // state
@@ -18,16 +17,17 @@ final case class PageInfo( ip: String,
                          ){
   override def toString = {
     if (name == "Connection failed.")
-      s"Connection failed for ip address $ip."
+      "Connection failed."
     else {
-      s"\nWhois Results for IP Address: $ip\nName: $name\nStreet: $street\nCity: $city\nState: $state\nPostal Code: $post\nCountry: $country\n" +
+      s"\nWhois Results for $url\nName: $name\nStreet: $street\nCity: $city\nState: $state\nPostal Code: $post\nCountry: $country\n" +
         s"IP Address Range: $ipRange\nWhois Registration Info URL: $url" + "\n"
     }
   } // END toString()
 
 } // END PageInfo case class
 
-class WhoIs(ip: String) extends HttpClient(ip) {
+class WhoIs(ip: String) {
+
   def query( connectTimeOut: Int = 5000,
              readTimeout: Int = 5000,
              request: String = "GET" ): PageInfo = {
@@ -35,13 +35,12 @@ class WhoIs(ip: String) extends HttpClient(ip) {
     val url = "http://whois.arin.net/rest/ip/" + ip
 
     println("Querying with whois at url: " + url + "\n")
-    val page = super.queryPage(ip) //grabPage(url, connectTimeOut, readTimeout, request)
+    val page = grabPage(url, connectTimeOut, readTimeout, request)
 
     val (url2, netRange): (String, String) = parsePageUrl(page)
 
-    val infoPage = Try(super.queryPage(url2)).getOrElse("Connection to second page failed...")
-
-    //Try(grabPage(url2, connectTimeOut, readTimeout, request)).getOrElse("Connection to second page failed...")
+    val infoPage = Try(grabPage(url2, connectTimeOut, readTimeout, request))
+      .getOrElse("Connection to second page failed...")
 
     val ipInfo: Vector[String] = parseInfo(infoPage)
 
@@ -135,7 +134,7 @@ class WhoIs(ip: String) extends HttpClient(ip) {
     val href = Try(secondSplit.split('\"')(0)).getOrElse("Split fail")
 
     val range = Try(page.split("""Range</td><td>""")(1)).getOrElse("Connection failed.")
-    // println("Printing split one result: " + range)
+    println("Printing split one result: " + range)
     val finalRange = Try(range.split("""</td>""")(0)).getOrElse("Connection failed.")
 
     return (href.trim, finalRange.trim)
