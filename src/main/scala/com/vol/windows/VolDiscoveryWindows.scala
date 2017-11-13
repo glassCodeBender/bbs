@@ -601,9 +601,12 @@ object NetScan extends VolParse {
     // Used splitLast() from StringOperations to ensure compatibility w/ IPv6
     val ipSplit: Array[String] = ipAddr.splitLast(':')
 
+    println(s"Performing whois lookup for ip address: $ipAddr")
     val whois = new WhoIs(ipSplit(0))
 
-    val whoisResult = Try(whois.query()).getOrElse(PageInfo("Connection Failed.", "", "", "", "", "", "", ""))
+    val whoisResult = Try(whois.query()).getOrElse(PageInfo("Connection Failed.","Connection failed", "", "", "", "", "", "", ""))
+    println("Printing whois result... ")
+    println(whoisResult)
     /** Try to connect to whois to find information about */
     // Try(whois.connect("www.whois.arin.net")).getOrElse(println(response))
 
