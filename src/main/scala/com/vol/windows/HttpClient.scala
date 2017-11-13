@@ -1,5 +1,8 @@
 package com.bbs.vol.httpclient
 
+/**
+  *  Grabs webpages by URL.
+  */
 import java.net.{HttpURLConnection, URL}
 
 class HttpClient(url: String) {
