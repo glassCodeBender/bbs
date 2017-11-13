@@ -35,11 +35,11 @@ class WhoIs(ip: String) extends HttpClient(ip) {
     val url = "http://whois.arin.net/rest/ip/" + ip
 
     println("Querying with whois at url: " + url + "\n")
-    val page = super.query(ip) //grabPage(url, connectTimeOut, readTimeout, request)
+    val page = super.queryPage(ip) //grabPage(url, connectTimeOut, readTimeout, request)
 
     val (url2, netRange): (String, String) = parsePageUrl(page)
 
-    val infoPage = Try(super.query(url2)).getOrElse("Connection to second page failed...")
+    val infoPage = Try(super.queryPage(url2)).getOrElse("Connection to second page failed...")
 
     //Try(grabPage(url2, connectTimeOut, readTimeout, request)).getOrElse("Connection to second page failed...")
 
