@@ -26,7 +26,7 @@ final case class PageInfo( ip: String,
 
 } // END PageInfo case class
 
-class WhoIs(ip: String) {
+class WhoIs(ip: String) extends HttpClient {
 
   def query( connectTimeOut: Int = 5000,
              readTimeout: Int = 5000,
@@ -35,11 +35,11 @@ class WhoIs(ip: String) {
     val url = "http://whois.arin.net/rest/ip/" + ip
 
     println("Querying with whois at url: " + url + "\n")
-    val page = grabPage(url, connectTimeOut, readTimeout, request)
+    val page = queryPage(url, connectTimeOut, readTimeout, request)
 
     val (url2, netRange): (String, String) = parsePageUrl(page)
 
-    val infoPage = Try(grabPage(url2, connectTimeOut, readTimeout, request))
+    val infoPage = Try(queryPage(url2, connectTimeOut, readTimeout, request))
       .getOrElse("Connection to second page failed...")
 
     val ipInfo: Vector[String] = parseInfo(infoPage)
