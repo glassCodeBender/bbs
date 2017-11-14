@@ -12,6 +12,8 @@ import StringOperations._
   * DetectUnlinkedDLLs object
   */
 
+// import com.bigbrainsecurity.utils.nlp.StringOperations._
+
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import sys.process._
@@ -36,7 +38,8 @@ final case class ProcessBrain( yara: YaraBrain,
                                // parents: Vector[(String, Vector[(String, String)])],
                                privs: Vector[Privileges],
                                malfind: Map[String, String],
-                               netActivity: Map[String, Boolean] ) // Map of PID -> (whether or not proc does networking)
+                               netActivity: Map[String, Boolean],
+                               promiscMode: Map[String, Boolean]) // Map of PID -> (whether or not proc does networking)
 
 /** Stores pertinent information parsed from yarascan */
 final case class YaraParse( classification: String, // What list did rule come from?
@@ -86,14 +89,9 @@ case class Privileges( pid: String,
   * Generate a list of processes that shouldn't be doing certain things.
   */
 
-class ProcessDiscoveryWindows( os: String,
-                               memFile: String,
-                               process: Vector[ProcessBbs],         // Info from original
-                               netConn: Vector[NetConnections]
-                  //yaraMap: Map[String, String] // SKIPPED Info from config file about how detailed scan should be.
-                             ) extends VolParse {
+object ProcessDiscoveryWindows extends VolParse {
 
-  private[windows] def run: ProcessBrain = {
+  private[windows] def run(os: String, memFile: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
 
     /**
       * LOGIC NEEDS TO BE DIFFERENT NOW THAT WE'RE LOOKING AT OFFSETS.
@@ -131,17 +129,19 @@ class ProcessDiscoveryWindows( os: String,
     regPersistenceInfo.foreach(println)
 
     println("\n\nScanning to determine process networking capabilities...\n\n")
-    /** Determine if a pid has networking capability. */
-    /**
-      * NEED TO LOOK FOR OFFSETS OF HIDDEN PROCESSES!
-      */
-    val netPidMap: Map[String, Boolean] = examineNetActivity(memFile, os, process)
+
+    /** Determine which pids have networking capability and look for promiscuous mode. */
+    val (netPidMap, promiscMap): (Map[String, Boolean], Map[String, Boolean]) = {
+      examineNetActivity(memFile, os)
+    }
 
     /********************************************
       * THIS IS CAUSING PROBLEMS WITH OLDER OSs
       *******************************************/
     println("\n\nPrinting information about pid's networking capability...\n\n")
     for((key, bool) <- netPidMap) println(key + " -> " + bool )
+    println("\n\nPrinting information about promiscuous mode...\n\n")
+    for((key, bool) <- promiscMap)println(key + " -> " + bool)
 
     println("\n\nScanning to determine enabled privileges...\n\n")
 
@@ -170,7 +170,7 @@ class ProcessDiscoveryWindows( os: String,
   * Currently this method returns the entire scan result if network artifacts are found.
   * Method might be unnecessary
   */
-    return ProcessBrain(yaraScan, regPersistenceInfo, dllInfo, ldrInfo, enabledPrivs, malfind, netPidMap )
+    return ProcessBrain(yaraScan, regPersistenceInfo, dllInfo, ldrInfo, enabledPrivs, malfind, netPidMap, promiscMap )
   } // END run()
 
   /**********************************************************************/
@@ -265,31 +265,36 @@ class ProcessDiscoveryWindows( os: String,
     return (pid, malScan)
   } // END malfindPerPid()
 
-  /** Determines which PIDs do networking. */
-  private[this] def examineNetActivity(memFile: String, os: String,
-                                       process: Vector[ProcessBbs]): Map[String, Boolean] = {
-    val resultVec: Vector[(String, Boolean)] = {
-      for(proc <- process) yield netPerPid(memFile, os, proc.pid, proc.offset, proc.hidden)
-    }
-    val result: Map[String, Boolean] = resultVec.toMap
-    return result
+  /** Determines which PIDs do networking and if promiscuous mode is on. */
+  private[this] def examineNetActivity(memFile: String, os: String): (Map[String, Boolean], Map[String, Boolean]) = {
+    val networkActivity = Try( s"python vol.py -f $memFile --profile=$os handles -t File").getOrElse("")
+    val netActivityVec: Vector[String] = parseOutputNoHeader(networkActivity).getOrElse(Vector[String]())
+    val netActivity = netCheck(netActivityVec)
+    val promiscMode = promiscCheck(netActivityVec)
+
+    return (netActivity, promiscMode)
   } // END examineNetActivity()
 
   /** Determines if an individual PID does networking */
-  private[this] def netPerPid(memFile: String, os: String, pid: String,
-                              offset: String, hid: Boolean): (String, Boolean) = {
-    var networkActivity = ""
+  private[this] def netCheck(vec: Vector[String]): Map[String, Boolean] = {
+    val netActivity = vec.filter(x => x.contains("Afd\\Endpoint"))
 
-    if (hid)
-      networkActivity = Try( s"python vol.py -f $memFile --profile=$os handles --offset=$offset -t File").getOrElse("")
-    else
-      networkActivity = Try( s"python vol.py -f $memFile --profile=$os handles -p $pid -t File").getOrElse("")
+    val netActivity2d = vecParse(netActivity).getOrElse(Vector[Vector[String]]())
 
-    val parsed = parseOutputNoHeader(networkActivity.toLowerCase)
-    val endBool = parsed.exists(x => x.contains("afd\\endpoint"))
+    val pidToActivity: Vector[(String, Boolean)] = netActivity2d.map(x => (Try(x(1)).getOrElse("problem"), true))
 
-    return (pid, endBool)
+    return pidToActivity.toMap
   } // END netPerPid()
+
+  /** Looks for promiscuous mode */
+  private[this] def promiscCheck(vec: Vector[String]): Map[String, Boolean] = {
+    val netActivity = vec.filter(x => x.contains("RawIp\\0"))
+    val netActivity2d = vecParse(netActivity).getOrElse(Vector[Vector[String]]())
+
+    val pidToActivity: Vector[(String, Boolean)] = netActivity2d.map(x => (Try(x(1)).getOrElse("problem"), true))
+
+    return pidToActivity.toMap
+  } // END promiscCheck()
 
   /**
     * fileNameDiscrepancies()
@@ -636,9 +641,7 @@ object AutomateYara extends VolParse {
 
    return parseYaraString(ip)
 */
-    Vector(YaraParseString("", "", ""))
-
-
+    return Vector(YaraParseString("", "", ""))
   } // END findIpRule
 
   /** Find suspicious string. */
@@ -725,7 +728,7 @@ object AutomateYara extends VolParse {
 
     return parseSigs
     */
-    Vector(YaraParse("", "", "", ""))
+    return Vector(YaraParse("", "", "", ""))
   } // END findCrypto()
 
   private[this] def findExploitKits(memFile: String, os: String): Vector[YaraParse] = {
@@ -1119,14 +1122,14 @@ final case class LdrInfo( pid: String,
                           dllName: Vector[String],
                           pathDiscrepancies: Boolean = false){  // Vector of problem DLL names
   override def toString: String = {
-    // val str = StringBuilder
+
     val cleanProb = for{
       prob <- probs
       if prob.nonEmpty
     } yield prob
 
     if(cleanProb.isEmpty)""
-    else cleanProb.map(_.trim).mkString
+    else cleanProb.map(_.trim).mkString("\n")
   } // END toString()
 } // END LdrInfo case class
 
@@ -1196,18 +1199,28 @@ object DllScan extends VolParse {
       *************************************************************************************************************/
     val problems: Vector[String] = ldrLower.filter(_.contains("false"))
     val problemsFound = problems.filter(x => x.contains(".dll"))
-    val trimmedProbs = problemsFound.map(_.trim)
+    val trimmedProbs: Vector[String] = problemsFound.map(_.trim)
+
     val cleanedProbs: Vector[String] = for{
       prob <- trimmedProbs
       if prob.nonEmpty
     } yield prob
 
-    val pattern = "0x\\w+".r
-    val baseLocations: Vector[String] = trimmedProbs.map(x => pattern.findFirstIn(x).getOrElse(""))
+    if(cleanedProbs.nonEmpty){
+      println("Printing hidden DLL that was found...")
+      cleanedProbs.foreach(println)
+    }
 
-    val dllPattern = "\\w+\\.dll$".r
-    val nameLine = trimmedProbs.filter(_.contains("mem"))
-    val dllName = nameLine.map(x => dllPattern.findFirstIn(x).getOrElse(""))
+
+    val pattern = "0x\\w+".r
+    val baseLocations: Vector[String] = cleanedProbs.map(x => pattern.findFirstIn(x).getOrElse(""))
+
+    val dllPattern = "\\w+\\.dll".r   // PREVIOUS REGEX: "\\w+\\.dll$".r
+    // val nameLine = cleanedProbs.filter(_.contains("mem"))
+    val dllName = cleanedProbs.map(x => dllPattern.findFirstIn(x).getOrElse(""))
+
+    println("Printing hidden DLL Name: ")
+    for(name <- dllName) println("Hidden DLL: " + name)
 
     LdrInfo(pid, baseLocations, cleanedProbs, dllName, meterBool)
   } // ldrScan()
