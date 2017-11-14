@@ -1,7 +1,10 @@
 package com.bbs.vol.httpclient
 
+/**
+  * WhoIs.scala performs a whois lookup for ip addresses found on system. 
+  */
+
 import java.net.{HttpURLConnection, URL}
-// import com.bbs.vol.windows.StringOperations._
 
 import scala.util.Try
 
@@ -139,23 +142,5 @@ class WhoIs(ip: String) extends HttpClient {
 
     return (href.trim, finalRange.trim)
   } // END parsePage()
-
-  /** Get web page */
-  private[this] def grabPage(url: String,
-                             connectTime: Int,
-                             readTime: Int,
-                             request: String): String = {
-    val connection = new URL(url).openConnection.asInstanceOf[HttpURLConnection]
-
-    connection.setConnectTimeout(connectTime)
-    connection.setReadTimeout(readTime)
-    connection.setRequestMethod(request)
-
-    val inputStream = connection.getInputStream
-    val webPage: String = io.Source.fromInputStream(inputStream).mkString
-    if (inputStream == null) inputStream.close()
-
-    return webPage
-  } // END grabPage()
 
 } // END WhoIs
