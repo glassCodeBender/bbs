@@ -1,13 +1,10 @@
 package com.bbs.vol.httpclient
 
-/**
-  *  Grabs webpages by URL.
-  */
 import java.net.{HttpURLConnection, URL}
 
-class HttpClient(url: String) {
+trait HttpClient{
 
-  def query(url: String, connectTimeOut: Int = 5000,
+  def queryPage(url: String, connectTimeOut: Int = 5000,
             readTimeout: Int = 5000,
             request: String = "GET" ): String = {
     val page = grabPage(url, connectTimeOut, readTimeout, request)
