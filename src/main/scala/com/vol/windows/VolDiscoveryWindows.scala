@@ -121,13 +121,13 @@ final case class ProcessBbs( pid: String,
 } // END ProcessBbs class
 
 /********************** AutomateVolDiscoveryWindows object ***********************/
-class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends VolParse {
+object VolDiscoveryWindows extends VolParse {
 
   /**
     * This is the functional main method for performing our initial
     * volatility scans. Based on these results, we'll perform more scans.
     */
-  private[windows] def run( ): Discovery = {
+  private[windows] def run(memFile: String, os: String, dump: String ): Discovery = {
 
     /************************ PERFORM VOLATILITY SCANS **************************/
 
@@ -166,8 +166,8 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
     /** Contains suspicious SIDs and suspicious usernames */
    // val suspiciousSIDs: mutable.Map[String, String] = DetectLateralMovement.run(memFile, os)
 
-     val sysRegistry: Vector[String] = sysRegistryCheck()
-     val userRegistry: Vector[String] = userRegistryCheck()
+     val sysRegistry: Vector[String] = sysRegistryCheck(memFile, os)
+     val userRegistry: Vector[String] = userRegistryCheck(memFile, os)
 
     /****************************************************************************
       ***************************************************************************
@@ -195,7 +195,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
   } // END run()
 
   /** Extract the MFT */
-  private[this] def extractMFT(): Unit = {
+  private[this] def extractMFT(memFile: String, os: String, dump: String): Unit = {
     /** Create directory to store mft dump in. */
     val mftDir = dump + "/" + "mft_dump/"
     val dir = new File(mftDir)
@@ -207,7 +207,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
       .getOrElse("")
   } // END extractMFT()
 
-  private[this] def extractEVT(): Unit = {
+  private[this] def extractEVT(memFile: String, os: String, dump: String): Unit = {
     /**
       * Events we want to look for:
       * Unsuccessful logons:
@@ -237,7 +237,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
     */
 
   /** Get the results of checking system registry keys sometimes indicative of persistence */
-  private[this] def sysRegistryCheck(): Vector[String] = {
+  private[this] def sysRegistryCheck(memFile: String, os: String): Vector[String] = {
     val quote = "\""
 
     val key1 =  "\"HKLM\\SOFTWARE\\Microsoft\\CurrentVersion\\RunOnce\""
@@ -271,7 +271,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
   } // END sysRegistryCheck()
 
   /** Get the results of checking user registry keys sometimes indicative of persistence or anti-forensics */
-  private[this] def userRegistryCheck(): Vector[String] = {
+  private[this] def userRegistryCheck(memFile: String, os: String): Vector[String] = {
     val key1 =  "\"HKCU\\SOFTWARE\\Microsoft\\" + "\"" + "Windows NT" + "\"" + "\\CurrentVersion\\Windows\""
     val key2 = "\"HKCU\\SOFTWARE\\Microsoft\\" + "\"" + "Windows NT" + "\"" + "\\CurrentVersion\\Windows\\Run\""
     val key3 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\Run\""
@@ -300,7 +300,7 @@ class VolDiscoveryWindows(memFile: String, os: String, dump: String) extends Vol
   } // END userRegistryCheck()
 
   /** Need to add ethscan plugin. */
-  def pcap = {
+  def pcap(memFile: String, os: String, dump: String) = {
     Try(s"python vol.py -f $memFile --profile=$os ethscan -C $dump/out.pcap".! ).getOrElse("")
   }
 } // END AutomateVolDiscoveryWindows object
@@ -522,12 +522,12 @@ object ProcessBbsScan extends VolParse {
 } // END ProcessBbsScan object
 
 final case class NetConnections( pid: String,
-                           localIP: String,
-                           destIP: String,
-                           destLocal: Boolean = true,  // Is the destination IP address local?
-                           vnc: Boolean ){              // Check if VNC port 5500 is listening.
+                                 srcIP: String,
+                                 destIP: String,
+                                 destLocal: Boolean = true,  // Is the destination IP address local?
+                                 vnc: Boolean ){              // Check if VNC port 5500 is listening.
   override val toString = {
-    s"\n\nPID: $pid\nLocal IP: $localIP\nDestination IP: $destIP\nDestination Local: " +
+    s"\n\nPID: $pid\nSource IP: $srcIP\nDestination IP: $destIP\nDestination Local: " +
       s"$destLocal\nVNC Port Found: $vnc\n\n"
   }
 } // END NetConnections class
@@ -565,7 +565,7 @@ object NetScan extends VolParse {
 
     val localConnects = for {
       line <- conn2d
-      if line(2).trim.startsWith("198.") || line(2).trim.startsWith("172.") || line(2).trim.startsWith("10.")
+      if line(2).trim.startsWith("198") || line(2).trim.startsWith("172") || line(2).trim.startsWith("10\\.")
     } yield new NetConnections(line(3), line(1), line(2), destLocal = true, line(2).splitLast(':')(1) == "5800" )
 
     val outsideConnects = for {
