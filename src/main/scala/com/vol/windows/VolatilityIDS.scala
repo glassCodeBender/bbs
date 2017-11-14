@@ -7,6 +7,14 @@ package com.bbs.vol.windows
   *          Contains main method of program.
   */
 
+/**
+  * TO DO
+  * ** Write ethscan analysis
+  * ** Look for executables disguised as non-executables. WordDoc.docx.exe */
+
+
+
+
 import scala.io.Source
 import sys.process._
 import java.io.File
@@ -17,6 +25,7 @@ import com.bbs.vol.processtree._
 import scala.collection.immutable.TreeMap
 import com.bbs.vol.windows.StringOperations._
 
+import scala.collection.mutable
 import scala.util.Try
 
 object VolatilityIDS {
@@ -52,7 +61,8 @@ object VolatilityIDS {
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
     val dumpDir = mkDir( memFile )
 
-    val discovery = new VolDiscoveryWindows( memFile, os, dumpDir )
+    /** Broadly examine image for malicious behavior. */
+    val discoveryResult: Discovery = VolDiscoveryWindows.run( memFile, os, dumpDir )
 
     /** discoveryResult Contains:
       *
@@ -65,13 +75,18 @@ object VolatilityIDS {
       *                  registry: (Vector[String], Vector[String])     // (User Registry, System Registry)
       *                  )
       */
-    val discoveryResult: Discovery = discovery.run()
 
     val process: Vector[ProcessBbs] = discoveryResult.proc._1
     val netConns = discoveryResult.net._1
 
-    val processDiscovery = new ProcessDiscoveryWindows(os, memFile, process, netConns)
-    val procDiscoveryResult: ProcessBrain = processDiscovery.run
+    /** Examine individual processes */
+    val processDiscovery = ProcessDiscoveryWindows.run(os, memFile, process, netConns)
+
+    /** Search for hidden executables. */
+    val hiddenExecs = findHiddenExecs(process)
+    /** Determine overall risk rating for memory image */
+    val riskRating = FindSuspiciousProcesses.run(discoveryResult, processDiscovery)
+
 
     /** Need to write extract parts of Discovery (proc), and pass it to next section of program. */
 
@@ -112,7 +127,7 @@ object VolatilityIDS {
     // val checkCreation: Boolean = dir.mkdir()
 
     if(dir.mkdir()){
-      println(s"\n\nLog files, prefetch files, mft, and pcaps will be located in the following directory:\n$dirName\n\n")
+      println(s"Log files, prefetch files, mft, and pcaps will be located in the following directory:\n$dirName")
     } else{
       println("\n\n\nWe failed to create a directory for lots of helpful information. Check and make sure\n" +
         s"the directory $dirName doesn't already exist.\n\n")
@@ -147,10 +162,48 @@ object VolatilityIDS {
       "To test your image, open the console and type the following:\n\t" +
       s">> python vol.py -f $memFile imageinfo\n\n" )
 
-    val imageInfo: Option[String] = Some( s"python vol.py -f $memFile imageinfo".!!.trim )
+    // val imageInfo: Option[String] = Some( s"python vol.py -f $memFile imageinfo".!!.trim )
 
+    val imageInfo = Some("")
     print(imageInfo.getOrElse(""))
   }
+
+  /** Looks for hidden executables. */
+  private[this] def findHiddenExecs(vec: Vector[ProcessBbs]): Vector[String] = {
+
+    val hiddenExecPattern = {
+      Vector(".+//.xlsx.exe", ".+//.csv.exe", ".+//.doc.exe", ".+//.xls.exe", ".+//.xltx.exe", ".+//.xlt.exe",
+        ".+//.pdf.exe", ".+//.xlsb.exe", ".+//.xlsm.exe", ".+//.xlst.exe", ".+//.xml.exe", ".+//.txt.exe",
+        ".+//.ods.exe", ".+//.docx.exe", ".+//.dot.exe", ".+//.rtf.exe", ".+//.docm.exe", ".+//.dotm.exe",
+        ".+//.htm.exe", ".+//.mht.exe", ".+//.jpg.exe", ".+//.ppt.exe", ".+//.pptx.exe", ".+//.pot.exe",
+        ".+//.odp.exe", ".+//.ppsx.exe", ".+//.pps.exe", ".+//.pptm.exe", ".+//.potm.exe", ".+//.ppsm.exe",
+        ".+//.py.exe", ".+//.pl.exe", ".+//.eml.exe", ".+//.json.exe", ".+//.mp3.exe", ".+//.wav.exe", ".+//.aiff.exe",
+        ".+//.au.exe", ".+//.pcm.exe", ".+//.ape.exe", ".+//.wv.exe", ".+//.m4a.exe", ".+//.8svf.exe", ".+//.webm.exe",
+        ".+//.wv.exe", ".+//.wma.exe", ".+//.vox.exe", ".+//.tta.exe", ".+//.sln.exe", ".+//.raw.exe", ".+//.rm.exe",
+        ".+//.ra.exe", ".+//.opus.exe", ".+//.ogg.exe", ".+//.oga.exe", ".+//.mogg.exe", ".+//.msv.exe", ".+//.mpc.exe",
+        ".+//.mmf.exe", ".+//.m4b.exe", ".+//.ivs.exe", ".+//.ilkax.exe", ".+//.gsm.exe", ".+//.flac.exe",
+        ".+//.dvf.exe", ".+//.dss.exe", ".+//.dct.exe", ".+//.awb.exe", ".+//.amr.exe", ".+//.act.exe", ".+//.aax.exe",
+        ".+//.aa.exe", ".+//.3gp.exe", ".+//.webm.exe", ".+//.mkv.exe", ".+//.flv.exe", ".+//.vob.exe", ".+//.ogv.exe",
+        ".+//.ogg.exe", ".+//.gif.exe", ".+//.gifv.exe", ".+//.mng.exe", ".+//.avi.exe", ".+//.mov.exe", ".+//.qt.exe",
+        ".+//.wmv.exe", ".+//.yuv.exe", ".+//.rm.exe", ".+//.rmvb.exe", ".+//.asf.exe", ".+//.amv.exe", ".+//.mp4.exe",
+        ".+//.m4p.exe", ".+//.m4v.exe", ".+//.amv.exe", ".+//.asf.exe")
+    } // END hiddenExecPattern
+
+    /** Combine all the strings in the Vector to make a single regex */
+    val makeRegex = "(" + hiddenExecPattern.mkString("|") + ")"
+    val regex = makeRegex.r
+
+    /** Vector of process names. */
+    val procVec: Vector[String] = vec.map(x => x.name).distinct
+    val searchForHiddenProcs = procVec.map(x => regex.findFirstIn(x).getOrElse("None"))
+    val hiddenProcs = searchForHiddenProcs.filterNot(x => x.contains("None"))
+    if(hiddenProcs.nonEmpty) {
+      println("\nPrinting hidden executables.\n\n")
+      hiddenProcs.foreach(println)
+    }
+
+    return hiddenProcs
+  } // END hiddenExecPattern
 
   /**
     * This map will be periodically updated. I'm hoping that about 75% of the processes on regular systems will be
@@ -207,21 +260,21 @@ object VolatilityIDS {
     "RUNDLL32.EXE" -> "A system process that executes DLLs and loads their libraries.",
     "SAVSCAN.EXE" -> "Nortons AntiVirus process.",
 
-      "SEARCHINDEXER.EXE" -> "Standard process",
-      "WMIPRVSE.EXE" -> "Standard",
+      "SEARCHINDEXER.EXE" -> "Standard Windows process",
+      "WMIPRVSE.EXE" -> "Standard Windows Process.",
       "TASKLIST.EXE" -> "Executable used to grab Windows processes",
-      "SEARCHUI.EXE" -> "Standard",
+      "SEARCHUI.EXE" -> "Standard Windows process.",
       "SKYPEHOST.EXE" -> "Skype",
       "ONEDRIVE.EXE" -> "Microsoft OneDrive",
-      "MSASCUIL.EXE" -> "Standard",
-      "SHELLEXPERIENCEHOST.EXE" -> "Standard",
-      "RUNTIMEBROKER.EXE" -> "Standard",
+      "MSASCUIL.EXE" -> "Standard Windows process.",
+      "SHELLEXPERIENCEHOST.EXE" -> "Standard Windows process.",
+      "RUNTIMEBROKER.EXE" -> "Standard Windows process.",
       "NISSRV.EXE" -> "Standard",
-      "BACKGROUNDTASKHOST.EXE" -> "Standard",
+      "BACKGROUNDTASKHOST.EXE" -> "Standard Windows process.",
       "POWERSHELL.EXE" -> "Windows Powershell",
       "VMTOOLSD.EXE" -> "VMware Tools.",
       "VMACTHLP.EXE" -> "VMware Physical Disk Helper",
-      "DWM.EXE" -> "Standard",
+      "DWM.EXE" -> "Standard Windows process.",
       "MICROSOFTEDGE.EXE" -> "Microsoft Edge",
       "MICROSOFTEDGECP.EXE" -> "Microsoft Edge",
       "INSTALLAGENT.EXE" -> "",
@@ -371,9 +424,9 @@ object ProcessDescription {
 final case class RiskRating(riskRating: Integer)
 
 /** Class looks at the results of previous scans and determines if indicators of a breach were found. */
-object FindSuspiciousProcesses{
+object FindSuspiciousProcesses {
 
-  def run(disc: Discovery, process: ProcessBrain) = {
+  def run(disc: Discovery, process: ProcessBrain): Int = {
 
     /** */
     var riskRating = 0
@@ -382,19 +435,19 @@ object FindSuspiciousProcesses{
       * Get info from Discovery case class
       */
 
-    /*********************************************************
+    /** *******************************************************
       * Console commands should be given risk rating in a map.
-      ********************************************************/
+      * *******************************************************/
 
-      // YaraParseString(rule, proc, str)
-      // YaraParse(classification, rule, owner, offset)
+    // YaraParseString(rule, proc, str)
+    // YaraParse(classification, rule, owner, offset)
     val proc: Vector[ProcessBbs] = disc.proc._1
     /** callbacks, hiddenModules, timers, deviceTree, orphanThread, found */
     val rootkit: RootkitResults = disc.rootkit
     /** (pid -> Remote Mapped Drive) */
     val remoteMapped: Vector[(String, String)] = disc.remoteMapped
     /** Vector[String], Vector[String] */
-    val (userReg, sysReg) = disc.registry
+    val registry = disc.registry
     /** svcStopped, suspCmds */
     val sysSt: SysState = disc.sysState
 
@@ -403,28 +456,53 @@ object FindSuspiciousProcesses{
     /**
       * Get info from ProcessBrain
       */
-    /** Need  */
     val yaraObj: YaraBrain = process.yara
-    val regPersist: Vector[RegPersistenceInfo] = process.regPersistence
-    val ldr: Vector[LdrInfo] = process.ldrInfo
-    val privs: Vector[Privileges] = process.privs
-    val yarSuspicious: YaraSuspicious = yaraObj.suspItems
+    val regPersist: Vector[RegPersistenceInfo] = process.regPersistence // done
+    val ldr: Vector[LdrInfo] = process.ldrInfo // done
+    val privs: Vector[Privileges] = process.privs // done
 
-    /** Grab significant yara scan findings */
-    val yarMalware: Vector[YaraParseString] = yaraObj.malware
-    val antidebug: Vector[YaraParse] = yarSuspicious.antidebug
-    val exploitKits: Vector[YaraParse] = yarSuspicious.exploitKits
-    val webshells: Vector[YaraParse] = yarSuspicious.webshells
-    val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
-    val suspStrs: Vector[YaraParseString] = yarSuspicious.suspStrings
-    val ip: Vector[YaraParseString] = yaraObj.ip
-    // Compare against top 10 malicious IPs -> isc.sans.edu/top10.php
+    val promiscModeMap: Map[String, Boolean] = process.promiscMode
+
+
+    /**
+      * Here is where we do the work
+      *
+      * NOTE: We should probably return tuples. (Info for printing report, Risk Rating)
+      */
+
+    /** Check privileges risk */
+    val privRating: Int = checkPrivs(privs)
+
+    println("Risk Rating for privileges: " + privRating.toString)
+
+    // Update risk rating
+    riskRating = riskRating + privRating
+
+    /** Check for memory leaks */
+    //  val regPersistRating: Int = checkRegPersistence(regPersist)
+
+    // println("Risk rating for registry persistence check: " + regPersistRating.toString )
+
+    // Update risk rating
+    // riskRating = riskRating + regPersistRating
+
+    /** Check for unlinked DLLs */
+
+    val unlinkedDlls = checkLdr(ldr)
+
+    println("Risk rating from unlinked DLLs: " + unlinkedDlls.toString)
+
+    // Update risk rating
+    riskRating = riskRating + unlinkedDlls
+
+    /** Check for remote mapped drives */
+
+    val remoteMappedRisk = checkRemoteMapped(remoteMapped)
 
     /**
       * Need to look at the parents of hidden processes. Is it cmd.exe or powershell.exe?
       */
 
-    ip
 
     /**
       * TO DO:
@@ -457,13 +535,247 @@ object FindSuspiciousProcesses{
       * - Magic (Research)
       */
 
+    return riskRating
   } // END run()
+
+  private[this] def checkPrivs(vec: Vector[Privileges]): Int = {
+
+    var rating = 0
+    /** We only want suspicious privs for now. */
+    val foundPrivs = for {
+      value <- vec
+      if value.suspiciousPrivs.nonEmpty
+    } yield value
+
+    val debugPrivs = for {
+      value <- vec
+      if value.debugPriv
+    } yield value
+
+    if (foundPrivs.nonEmpty) rating = foundPrivs.size
+    if (debugPrivs.nonEmpty) rating = debugPrivs.size * 2
+
+    /**
+      * MAKE PRETTY PRINT FINDINGS
+      */
+
+    return rating
+  } // END checkPrivs()
+
+  /** MAP can contain multiple keys idiot. Check code that generated this. */
+  /*
+  private[this] def checkRegPersistence(vec: Vector[RegPersistenceInfo]): Int = {
+
+    var riskRating = 0
+
+    val vecPersistMap: Vector[mutable.Map[String, Int]] = for(value <- vec) yield value.persistenceMap
+    /** Run keys greater than 0 */
+    val filterZeroMap: Vector[mutable.Map[String, Int]] = for{
+      value <- vecPersistMap
+      (key, result) <- value
+      if result > 0
+    } yield value
+
+    if(filterZeroMap.nonEmpty) {
+      println("Printing keys and values greater than 0 for debuging purposes:\n\n")
+      for((key, value) <- filterZeroMap) println(key + " -> " + value)
+    } // END if
+
+    /** Searching for memory leaks. Run keys greater than 0 */
+    val memoryLeak: Vector[String] = for{
+      regMap <- filterZeroMap
+      (key, value) <- regMap
+      if value > 5
+    } yield key
+
+    if (memoryLeak.nonEmpty) riskRating = riskRating + 100
+    if (memoryLeak.nonEmpty) {
+      println("A memory leak allowing an attacker to maintain persistence was found for the following pids: " +
+        memoryLeak.mkString(", ") + "\nIt is extremely likely that your computer was compromised.\n")
+    }
+
+    /**
+      * MAKE PRETTY PRINT FINDINGS
+      */
+
+    return riskRating
+  } // END checkRegPersistence()
+
+  private[this] def regPersistCheck(map: mutable.Map[String, Int]) = {
+
+    val key = map.k
+
+  } // END regPersistCheck()
+*/
+  /** Check for unlinked DLLs */
+  private[this] def checkLdr(vec: Vector[LdrInfo]): Int = {
+    var riskRating = 0
+    /*
+    pid: String,
+    baseLoc: Vector[String],   // base location of DLL.
+    probs: Vector[String],     // Finds lines that indicate there's an unlinked DLL.
+    dllName: Vector[String],
+    pathDiscrepancies: Boolean = false
+    */
+
+    /**
+      * THIS IS PROBABLY A PROBLEM
+      */
+
+    val probsVec: Vector[Vector[String]] = for (value <- vec) yield value.probs
+
+    val unlinked = for {
+      value <- vec
+      if value.probs.nonEmpty
+    } yield (value.pid, value.probs.mkString("\n"), value.probs.size)
+
+    if (unlinked.nonEmpty) {
+      println("\nThe following unlinked DLLs were discovered: \n")
+      for {
+        (key, value, size) <- unlinked
+      } println("PID: " + key + "\nNumber of unlinked DLLs: " + size.toString + "\nUnlinked DLLs: \n" + value)
+    } // END if
+
+    if (unlinked.nonEmpty) riskRating = unlinked.size * 10
+
+    /**
+      * MAKE PRETTY PRINT FINDINGS
+      */
+
+    return riskRating
+  } // END checkLdr()
+  private[this] def checkRemoteMapped(vec: Vector[(String, String)]): Int = {
+
+    var riskRating = 0
+
+    val remoteMappedSize = vec.size
+    if (vec.nonEmpty) {
+      println(remoteMappedSize.toString + " remote mapped drives were found on the system.")
+      for ((key, value) <- vec) println("PID: " + key + " -> " + value)
+    }
+    if (remoteMappedSize > 2) riskRating = 20
+    else if (remoteMappedSize <= 2) riskRating = 10
+    else if (remoteMappedSize == 0) riskRating = 0
+
+    /**
+      * MAKE PRETTY PRINT FINDINGS
+      */
+
+    return riskRating
+  } // END checkRemoteMapped()
+
+  private[this] def checkRootKitResults(root: RootkitResults) = {
+
+
+    /**
+      * MAKE PRETTY PRINT FINDINGS
+      */
+
+  } // END checkRootkitResults
+
+  private[this] def checkRegistry(root: (Vector[String], Vector[String])) = {
+
+
+  } // END checkRegistry()
+
+  private[this] def checkSysState(sys: SysState): Int = {
+    var riskRating = 0
+
+    /** Services that were stopped that indicate there is a problem.. */
+    val svcStopped: Vector[String] = sys.svcStopped
+
+    // ("Wscsvc", "Wuauserv", "BITS", "WinDefend", "WerSvc")
+
+    /** Rating depends on which service was stopped. WinDefend might be disabled by AV */
+    if (svcStopped.nonEmpty) {
+      if (svcStopped.contains("WinDefend")) {
+        println("Windows defender was disabled. This might be OK if you use other anti-virus software.\n\n")
+        riskRating = 5
+      } // END if
+      if (svcStopped.contains("BITS")) {
+        println("Background Intelligent Transfer Service was disabled. This might have been done by malware.\n\n")
+        riskRating = riskRating + 20
+      } // END if
+      if (svcStopped.contains("Wscsvc")){
+        println("Wscsvc.dll is disabled. Wscsvc provides support for the Windows security service." +
+        "If it is disabled, the user will not receive security alerts.\n\n")
+
+        riskRating = riskRating + 100
+      } // END if
+      if (svcStopped.contains("Wuauserv")){
+        println("Wuauserv is disabled. Wuauserv provides Windows updates. If the user did not disable this " +
+        "on their own, it's likely that the system was breached.\n\n")
+        // LOOK THIS UP
+      }
+    } // END if svcStopped.nonEmpty
+
+    return riskRating
+  } // END checkSysState()
+
+  private[this] def checkYara(yaraObj: YaraBrain): Int = {
+
+    /** Grab significant yara scan findings */
+    val yarMalware: Vector[YaraParseString] = yaraObj.malware
+    val yarSuspicious: YaraSuspicious = yaraObj.suspItems
+    val antidebug: Vector[YaraParse] = yarSuspicious.antidebug
+    val exploitKits: Vector[YaraParse] = yarSuspicious.exploitKits
+    val webshells: Vector[YaraParse] = yarSuspicious.webshells
+    val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
+    // val suspStrs: Vector[YaraParseString] = yarSuspicious.suspStrings
+
+    val malwareRating = checkMalware(yarMalware)
+    val antidebugRating = checkAntiDebug(antidebug)
+    val exploitkitRating = checkExploitKits(exploitKits)
+    val webshellsRating = checkWebshells(webshells)
+    val malDocRating = checkMalDocs(malDocs)
+
+    val riskRating = malwareRating + antidebugRating + exploitkitRating + webshellsRating + malDocRating
+
+    return riskRating
+  } // END checkYara()
+
+  private[this] def checkMalware(vec: Vector[YaraParseString]): Int = {
+    var riskRating = 0
+
+    val checkMalwareCount = vec.size
+    if (checkMalwareCount > 0) riskRating = checkMalwareCount * 10
+
+    return riskRating
+  } // END checkMalware()
+  private[this] def checkAntiDebug(vec: Vector[YaraParse]): Int  = {
+    var riskRating = 0
+
+    val checkAntiDebug = vec.size * 5
+
+    checkAntiDebug
+  } // END checkMalware()
+  private[this] def checkExploitKits(vec: Vector[YaraParse]): Int = {
+    var riskRating = 0
+
+    val exploitkitCount = vec.size * 10
+
+    exploitkitCount
+  } // END checkExploitKits()
+  private[this] def checkWebshells(vec: Vector[YaraParse]): Int  = {
+    var riskRating = 0
+
+    val webShellCount = vec.size * 5
+
+    webShellCount
+  } // END checkWebShells()
+  private[this] def checkMalDocs(vec: Vector[YaraParse]): Int  = {
+    var riskRating = 0
+
+    val malDocsCount = vec.size * 10
+
+    malDocsCount
+  } // END checkMalDocs()
 
   private[this] def checkPorts(yaraVec: Vector[YaraParseString], netVec: Vector[NetConnections]) = {
     /**
       * YaraParseString
       * pid: String,
-      * localIP: String,
+      * srcIP: String,
       * destIP: String,
       * destLocal: Boolean = true,  // Is the destination IP address local?
       * vnc: Boolean
@@ -479,7 +791,7 @@ object FindSuspiciousProcesses{
     }
 
     val connSrcPorts: Vector[(String, String)] = {
-      netVec.map(x => (x.pid, Try(x.localIP.splitLast(':')(1)).getOrElse("").trim))
+      netVec.map(x => (x.pid, Try(x.srcIP.splitLast(':')(1)).getOrElse("").trim))
     }
 
     val netConcat = connDestPorts ++: connSrcPorts
