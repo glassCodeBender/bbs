@@ -10,10 +10,17 @@ package com.bbs.vol.windows
 /**
   * TO DO
   * ** Write ethscan analysis
-  * ** Look for executables disguised as non-executables. WordDoc.docx.exe */
-
-
-
+  * ** Look for executables disguised as non-executables. WordDoc.docx.exe
+  * ** Look for commonly changed fileNames (e.g. svchost.exe)
+  * ** Consider IDT (369)
+  * ** Check if module loaded from temp path
+  * ** Examine module's path
+  * ** Compare driverscan Start address to modules base address. They should match.
+  * ** Extract start address from orphan thread, determine which process thread is located in. (How do you get exec end address?)
+  *
+  * AFTER REPORT PRODUCED:
+  * ** Extract DNS cache (340)
+  */
 
 import scala.io.Source
 import sys.process._
@@ -29,6 +36,11 @@ import scala.collection.mutable
 import scala.util.Try
 
 object VolatilityIDS {
+  /*****************************************************
+    ****************************************************
+    ******************~~~~~MAIN~~~~*********************
+    ****************************************************
+    ****************************************************/
   def main( args: Array[String] ): Unit = {
 
     // Need to read in user input from a config file.
@@ -450,6 +462,7 @@ object FindSuspiciousProcesses {
     val registry = disc.registry
     /** svcStopped, suspCmds */
     val sysSt: SysState = disc.sysState
+    val shim = disc.shimCache
 
     val net: Vector[NetConnections] = disc.net._1
 
@@ -499,6 +512,9 @@ object FindSuspiciousProcesses {
 
     val remoteMappedRisk = checkRemoteMapped(remoteMapped)
 
+    /** Contains risk value */
+    val (shimRisk, shimCacheTime): (Int, Vector[ShimCache]) = checkShimCacheTime(shim)
+    riskRating = riskRating + shimRisk
     /**
       * Need to look at the parents of hidden processes. Is it cmd.exe or powershell.exe?
       */
@@ -663,6 +679,42 @@ object FindSuspiciousProcesses {
 
     return riskRating
   } // END checkRemoteMapped()
+
+  /**
+    *
+    * CHECK SHELLBAGS FOR TIMESTOMPING (303)
+    * LOOK AT LAST UPDATE!!
+    *
+    */
+
+  private[this] def checkShimCacheTime(vec: Vector[ShimCache]): (Int, Vector[ShimCache]) = {
+
+    var riskRating = 0
+
+    // val years = vec.map(x => ShimCache(x.lastMod, x.lastUpdate.take(4), x.path))
+    /** Look for dates later than 2017. */
+    val timeStomp = for{
+      value <- vec
+      if Try(value.lastUpdate.take(4).toInt).getOrElse(0) > 2017
+    } yield value
+
+    /** Look for dates less than 1995 */
+    val timeStompEarly = for{
+      value <- vec
+      if Try(value.lastUpdate.take(4).toInt).getOrElse(3418) < 2000
+    } yield value
+
+    if(timeStomp.nonEmpty || timeStompEarly.nonEmpty) {
+      println("\nTimestomping was found on the system indicating that the system was breached\n")
+      println("Examine the following entries:\n")
+      riskRating = 100
+      if(timeStomp.nonEmpty) timeStomp.foreach(println)
+      if(timeStompEarly.nonEmpty) timeStompEarly.foreach(println)
+    }
+    val concatShells = timeStomp ++: timeStompEarly
+
+    return (riskRating, concatShells)
+  } // END checkShimCacheTime()
 
   private[this] def checkRootKitResults(root: RootkitResults) = {
 
