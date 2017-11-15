@@ -44,6 +44,14 @@ import sys.process._
 
 /********************************* CASE CLASSES ************************/
 
+/** Stores shimcache entries */
+final case class ShimCache(lastMod: String, lastUpdate: String, path: String){
+  override def toString(): String = {
+    s"\n\nShimcache Entries:\nPath: $path\nLast Modified: $lastMod\nLast Updated: $lastUpdate\n"
+  }
+
+}
+
 /** Store services and privileges info */
 final case class SysState(svcOnePerLine: Vector[String], // Each service on one line w/ sections pipe separated
                     svcStopped: Vector[String],    // Suspicious services that were found stopped
@@ -57,7 +65,9 @@ final case class Discovery( proc: (Vector[ProcessBbs], String),               //
                             net: (Vector[NetConnections], Vector[PageInfo]), // (connection Info, Whois Lookup)
                             rootkit: RootkitResults,                       // RootkitResults
                             remoteMapped: Vector[(String, String)],        // (pid -> RemoteMappedDrive Found)
-                            registry: (Vector[String], Vector[String])     // (User Registry, System Registry)
+                            registry: (Vector[String], Vector[String]),     // (User Registry, System Registry)
+                            shimCache: Vector[ShimCache],
+                            mftFileName: String
                           )
 
 /**
@@ -120,6 +130,12 @@ final case class ProcessBbs( pid: String,
   } // END getParents()
 } // END ProcessBbs class
 
+/****************************************************
+  ***************************************************
+  ******************~~~~~RUN~~~~*********************
+  ***************************************************
+  ***************************************************/
+
 /********************** AutomateVolDiscoveryWindows object ***********************/
 object VolDiscoveryWindows extends VolParse {
 
@@ -166,8 +182,18 @@ object VolDiscoveryWindows extends VolParse {
     /** Contains suspicious SIDs and suspicious usernames */
    // val suspiciousSIDs: mutable.Map[String, String] = DetectLateralMovement.run(memFile, os)
 
-     val sysRegistry: Vector[String] = sysRegistryCheck(memFile, os)
-     val userRegistry: Vector[String] = userRegistryCheck(memFile, os)
+   val shimCache = shimCacheEntries(memFile, os)
+   var sysRegistry = ArrayBuffer[String]()
+    var userRegistry = ArrayBuffer[String]()
+
+    if(os.contains("WinXp") || os.contains("Win2003")){
+      sysRegistry ++= sysRegistryCheckXP(memFile, os)
+      userRegistry ++= userRegistryCheckXP(memFile, os)
+    }else{
+      sysRegistry ++= sysRegistryCheck(memFile, os)
+      userRegistry ++= userRegistryCheck(memFile, os)
+    }
+
 
     /****************************************************************************
       ***************************************************************************
@@ -182,20 +208,67 @@ object VolDiscoveryWindows extends VolParse {
     userRegistry.foreach(println)
 
     println("\n\nExtracting Event Logs...")
-    // extractEVT()
+    // extractEVT(memFile, os, dump)
     println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...")
-    // extractMFT()
+    val mftFilename = extractMFT(memFile, os, dump)
 
     println("\n\nAnalyzing Windows services and gathering information about system state...\n")
     val sysState: SysState = SysStateScan.run(memFile, os)
 
     /** Returns a Discovery case class */
-    Discovery(processScanResults, sysState, netScanResult, rootkitHunt, remoteMapped, (userRegistry, sysRegistry))
+    Discovery(processScanResults, sysState, netScanResult, rootkitHunt,
+              remoteMapped, (userRegistry.toVector, sysRegistry.toVector), shimCache, mftFilename)
 
   } // END run()
 
+  private[this] def sysRegistryCheckXP(memFile: String, os: String): ArrayBuffer[String] = {
+    val quote = "\""
+
+    val key1 =  "\"Microsoft\\Windows\\CurrentVersion\\RunOnce\""
+    val key2 = "\"Microsoft\\Windows\\CurrentVersion\\Run\""
+
+    val key3 = "\"SYSTEM\\CurrentControlSet\\Control\\" + "Session Manager\\" + "Memory Management\\" + "PrefetchParameters\""
+
+    val runOnce: Option[String] = {
+      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim )
+    }
+    val explorerRun = {
+      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim )
+    }
+    val prefetch = {
+      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim )
+    }
+
+
+    val buff: ArrayBuffer[String] = {
+      ArrayBuffer(runOnce.getOrElse("KEY EXTRACTION FAILED"), explorerRun.getOrElse("KEY EXTRACTION FAILED"),
+        prefetch.getOrElse("KEY EXTRACTION FAILED"))
+    }
+
+    return buff
+  }
+  private[this] def userRegistryCheckXP(memFile: String, os: String): ArrayBuffer[String] = {
+    val quote = "\""
+
+    val key1 =  "\"HKEY_CURRENT_USER\\Software\\Microsoft\\CurrentVersion\\RunOnce\""
+    val key2 = "\"HKEY_CURRENT_USER\\Software\\Microsoft\\CurrentVersion\\Run\""
+
+    val runOnce: Option[String] = {
+      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim )
+    }
+    val run = {
+      Some(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim )
+    }
+
+    val buff: ArrayBuffer[String] = {
+      ArrayBuffer(runOnce.getOrElse(""), run.getOrElse(""))
+    }
+
+    return buff
+  }
+
   /** Extract the MFT */
-  private[this] def extractMFT(memFile: String, os: String, dump: String): Unit = {
+  private[this] def extractMFT(memFile: String, os: String, dump: String): String = {
     /** Create directory to store mft dump in. */
     val mftDir = dump + "/" + "mft_dump/"
     val dir = new File(mftDir)
@@ -205,6 +278,7 @@ object VolDiscoveryWindows extends VolParse {
     // Outputting MFT as body file so it's easily parsed w/ sleuthkit
     Try(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
       .getOrElse("")
+    return mftFileName
   } // END extractMFT()
 
   private[this] def extractEVT(memFile: String, os: String, dump: String): Unit = {
@@ -236,16 +310,34 @@ object VolDiscoveryWindows extends VolParse {
     * == Should also check for timestomping in registry
     */
 
-  /** Get the results of checking system registry keys sometimes indicative of persistence */
+  private[this] def shimCacheEntries(memFile: String, os: String): Vector[ShimCache] = {
+
+    val shimcache = Try( s"python vol.py -f $memFile --profile=$os shimcache".!!.trim ).getOrElse("")
+
+    val shimCacheVec = parseOutputDashVec(shimcache)
+    val shim2D = vecParse(shimCacheVec.getOrElse(Vector[String]()))
+
+    val shimVec = shim2D.getOrElse(Vector[Vector[String]]())
+      .map(x => ShimCache(x(0) + x(1) + x(2), x(3) + x(4) + x(5), Try(x(6)).getOrElse("") + Try(x(7)).getOrElse("") +
+        Try(x(8)).getOrElse("") + Try(x(9)).getOrElse("") + Try(x(10)).getOrElse("") + Try(x(11)).getOrElse("")))
+    //index 6
+
+    return shimVec
+  } // END shimCacheEntries()
+  /**
+    * Get the results of checking system registry keys sometimes indicative of persistence
+    *
+    * THIS NEEDS TO BE CHECKED!!!!!
+    */
   private[this] def sysRegistryCheck(memFile: String, os: String): Vector[String] = {
     val quote = "\""
 
-    val key1 =  "\"HKLM\\SOFTWARE\\Microsoft\\CurrentVersion\\RunOnce\""
-    val key2 = "\"HKLM\\SOFTWARE\\Microsoft\\CurrentVersion\\Policies\\Explorer\\Run\""
-    val key3 = "\"HKLM\\SOFTWARE\\Microsoft\\CurrentVersion\\Run\""
-    val key4 = "\"HKLM\\SYSTEM\\CurrentControlSet\\Services\""
-    val key5 = "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\" +
-      "\"Session Manager\"\\" + "\"Memory Management\"\\" + "PrefetchParameters\""
+    val key1 =  "\"SOFTWARE\\Microsoft\\CurrentVersion\\RunOnce\""
+    val key2 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Policies\\Explorer\\Run\""
+    val key3 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Run\""
+    val key4 = "\"SYSTEM\\CurrentControlSet\\Services\""
+    val key5 = "\"SYSTEM\\CurrentControlSet\\Control\\" +
+      "Session Manager\\" + "Memory Management\\" + "PrefetchParameters\""
 
     val runOnce: Option[String] = {
       Some(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim )
@@ -272,11 +364,11 @@ object VolDiscoveryWindows extends VolParse {
 
   /** Get the results of checking user registry keys sometimes indicative of persistence or anti-forensics */
   private[this] def userRegistryCheck(memFile: String, os: String): Vector[String] = {
-    val key1 =  "\"HKCU\\SOFTWARE\\Microsoft\\" + "\"" + "Windows NT" + "\"" + "\\CurrentVersion\\Windows\""
-    val key2 = "\"HKCU\\SOFTWARE\\Microsoft\\" + "\"" + "Windows NT" + "\"" + "\\CurrentVersion\\Windows\\Run\""
-    val key3 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\Run\""
-    val key4 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnce\""
-    val key5 = "\"HKCU\\SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnceEx\""
+    val key1 =  "\"SOFTWARE\\Microsoft\\" + "Windows NT" + "\\CurrentVersion\\Windows\""
+    val key2 = "\"SOFTWARE\\Microsoft\\" + "Windows NT" + "\\CurrentVersion\\Windows\\Run\""
+    val key3 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\Run\""
+    val key4 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnce\""
+    val key5 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnceEx\""
 
     val windows: String = {
       Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
@@ -648,6 +740,11 @@ object SysStateScan extends VolParse {
 */
   } // END run()
 
+  /**
+    * THIS SHOULD LOOK FOR ALL STOPPED SERVICES
+    * LOOK FOR "Binary Path: -"
+    */
+
   /** All the service scan related stuff runs out of this method. */
   private[this] def svcScan(memFile: String, os: String): (Vector[String], Vector[String]) = {
     // locate windows service records
@@ -857,7 +954,7 @@ case class RootkitResults( callbacks:(Vector[String], Vector[String]),
                            timers: Vector[String],
                            deviceTree: String,
                            orpanThread: String,
-                           found: Boolean = false)
+                           ssdtFound: Boolean = false)
 
 object RootkitDetector extends VolParse {
 
@@ -907,11 +1004,17 @@ object RootkitDetector extends VolParse {
     println("\nPrinting orphaned threads...\n\n")
     println(thread)
 
+    var ssdt = false
+    if(os.contains("x86")){
+      ssdt = ssdtScan(memFile, os)
+    }
+
+
     /************************************
       * NEED TO PERFORM SSDT scan
       ***********************************/
     // return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread)
-    return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread)
+    return RootkitResults(callbacks, hiddenModules, timers, deviceTree, thread, ssdt)
   } // END run()
 
   /**
@@ -1116,13 +1219,60 @@ object RootkitDetector extends VolParse {
 
   } // END driverScan()
 
+  private[this] def ssdtScan(memFile: String, os: String): Boolean = {
+    var inlineHookFound = false
+    val ssdt = {
+      Try( s"python vol.py -f $memFile --profile=$os ssdt --verbose".!!.trim ).getOrElse("")
+    }
+    val ssdtParsed = parseOutputNoTrim(ssdt).getOrElse(Vector[String]())
+    val inlineHook = ssdtParsed.filter(x => x.contains("HOOK?")).filter(x => x.contains("UNKNOWN"))
+
+    var buff = ArrayBuffer[String]()
+    var i = 0
+    while(i < ssdtParsed.length){
+      if(ssdtParsed(i).contains("HOOK?") & ssdtParsed(i).contains("(UNKNOWN)")){
+
+        /** Grab address locations */
+        val regex = "\\w+".r
+        val splitPreviousLine = ssdtParsed(i-1).split(':')
+        val splitCurrent = ssdtParsed(i).split('>')
+        val firstAddress = regex.findFirstIn(splitPreviousLine(1)).getOrElse("no")
+        val secondAddress = regex.findFirstIn(splitCurrent(1)).getOrElse("Word")
+        /** Check if address locations are the same. */
+        if(firstAddress != secondAddress){
+          println("Inline Hook Rootkit Found")
+          inlineHookFound = true
+        }
+
+      } // END if
+      i = i + 1
+    } // END while
+
+    // Need to check the pointer value
+
+    // Need to make sure to include previous line so we can see which driver is calling it.
+    return inlineHookFound
+  }// END ssdt()
+  /** Detect hidden network activity*/
   private[this] def driverIrpScan(memFile: String, os: String) = {
 
     /** See notes and 382-383 for information about processing driver scans */
     val driverIrpScan: String = {
       Try( s"python vol.py -f $memFile --profile=$os driverirp -r tcpip".!!.trim ).getOrElse("")
     }
+    val parsed = parseOutputDashVec(driverIrpScan).getOrElse(Vector[String]())
+    // regex to grab driver name.
+    val regex = "(\\|\\.|\\w+)$".r
 
+    val filterDriverNames = parsed.filterNot(x => regex.findFirstIn(x).getOrElse("Boo") == "Boo")
+
+    val suspectDrivers = filterDriverNames.filterNot(x => x.contains("tcpip.sys"))
+      .filterNot(x => x.contains("ntoskrnl.sys"))
+
+
+    /**
+      * Should point to a regular system driver. What are normal system drivers?
+      */
   } // END driverIrpScan()
 
 } // END RootkitDetector Object
