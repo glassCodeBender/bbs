@@ -49,7 +49,6 @@ final case class ShimCache(lastMod: String, lastUpdate: String, path: String){
   override def toString(): String = {
     s"\n\nShimcache Entries:\nPath: $path\nLast Modified: $lastMod\nLast Updated: $lastUpdate\n"
   }
-
 }
 
 /** Store services and privileges info */
