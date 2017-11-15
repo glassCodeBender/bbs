@@ -83,7 +83,7 @@ object CreateReport {
 
     /** PROCESS INFO */
 
-    
+
   } // END run()
 
   /*****************************************************************
@@ -195,9 +195,7 @@ object CreateReport {
     val docsTup = malDocs.map(x => (x.owner, x.rule))
     val docsVec =  for(value <- docsTup) yield "Process: " + value._1 + " Rule Found: " + value._2
     if(malDocs.nonEmpty) reportStr.append("\n\tExploit Kits:\n\t" + docsVec.mkString("\n\t"))
-
-    if(reportStr.isEmpty) reportStr.append("\tNone\n\n")
-
+    
     return reportStr.toString
   } // END malwareFound()
 } // END CreateReport
