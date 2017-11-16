@@ -443,12 +443,12 @@ object ProcessBbsScan extends VolParse {
   /** Functional main method of ProcessBbsScan object */
   private[windows] def run( memFile: String, os: String ): (Vector[ProcessBbs], String) = {
 
+    println("\nRunning psscan...\n")
     /** Returns Tuple with a map of pid -> info about processes and info about repeatFiles */
     val psScanResult: Vector[ProcessBbs] = psScan(memFile, os)
 
+    println("\nRunning pslist scan...\n")
     val psList: Vector[ProcessBbs] = psListScan(memFile, os)
-    println("Print psList()")
-    psList.foreach(println)
     val psListPid = psList.map(x => x.pid)
     // val psxviewResult: Vector[Vector[String]] = psxScan(memFile, os)
     val psTreeResult: String = psTreeScan(memFile, os)
@@ -458,10 +458,6 @@ object ProcessBbsScan extends VolParse {
       psScanResult.filter((x: ProcessBbs) => psListPid.contains(x.pid))
     }
 
-    println("Printing shouldBeFalse")
-    shouldBeFalse.foreach(println)
-
-
     val changeNotHidden: Vector[ProcessBbs] = {
       shouldBeFalse.map((x: ProcessBbs) => ProcessBbs(x.pid, x.offset, x.name, x.ppid, x.timeCreated, hidden = false))
     }
@@ -469,18 +465,10 @@ object ProcessBbsScan extends VolParse {
     /** Combine this with diff and we're set */
     val diffVec: Vector[ProcessBbs] = psScanResult.diff(shouldBeFalse)
 
-    println("Printing diffVec\n\n")
-    diffVec.foreach(println)
-
-    val hidden = {
-      diffVec.map((x: ProcessBbs) => ProcessBbs(x.pid, x.offset, x.name, x.ppid, x.timeCreated, true))
-    }
     val procVector: Vector[ProcessBbs] = {
       diffVec ++: changeNotHidden
     }
     val distinctProcess = distinctBy(procVector)(_.pid)
-    println("Printing the goal result!!!\n\n")
-    distinctProcess.foreach(println)
 
     return (distinctProcess, psTreeResult)
   } // END run()
