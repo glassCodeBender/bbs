@@ -1,6 +1,13 @@
 package com.bbs.vol.windows
 
+import com.bbs.vol.utils
 import StringOperations._
+import java.io.File
+import java.io.PrintWriter
+
+import com.bbs.vol.utils.RichCollection
+
+import scala.collection.IterableLike
 
 /**
   * @author J. Alexander
@@ -49,6 +56,7 @@ final case class ShimCache(lastMod: String, lastUpdate: String, path: String){
   override def toString(): String = {
     s"\n\nShimcache Entries:\nPath: $path\nLast Modified: $lastMod\nLast Updated: $lastUpdate\n"
   }
+
 }
 
 /** Store services and privileges info */
@@ -87,11 +95,12 @@ final case class ProcessBbs( pid: String,
                     name: String,                 // name of process
                     ppid: String,                 // parent ID
                     timeCreated: String,          // what time created?
-                    hidden: Boolean = false) { // is this process hidden
+                    hidden: Boolean = true) { // is this process hidden
 
   override def toString: String = {
     s"pid: $pid  \tname: $name \tppid: $ppid \ttime: $timeCreated \thidden: $hidden."
   }
+
   /** Accepts a Vector of current processes and finds parent name is */
   def parentName(vec: Vector[ProcessBbs]): String = {
     val parent = for {
@@ -152,8 +161,8 @@ object VolDiscoveryWindows extends VolParse {
     /** Contains Vector of processes and a ProcessBbs Tree */
     val processScanResults: (Vector[ProcessBbs], String) = ProcessBbsScan.run(memFile, os)
 
-    println("Printing process scan results\n")
-    processScanResults._1.foreach(println)
+
+
 
     /**
       * WARNING!!!!
@@ -211,6 +220,7 @@ object VolDiscoveryWindows extends VolParse {
     println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...")
     val mftFilename = extractMFT(memFile, os, dump)
 
+
     println("\n\nAnalyzing Windows services and gathering information about system state...\n")
     val sysState: SysState = SysStateScan.run(memFile, os)
 
@@ -220,6 +230,9 @@ object VolDiscoveryWindows extends VolParse {
 
   } // END run()
 
+  private[this] def cleanProcScan(vec: Vector[ProcessBbs]) = {
+
+  }
   private[this] def sysRegistryCheckXP(memFile: String, os: String): ArrayBuffer[String] = {
     val quote = "\""
 
@@ -237,7 +250,6 @@ object VolDiscoveryWindows extends VolParse {
     val prefetch = {
       Some(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim )
     }
-
 
     val buff: ArrayBuffer[String] = {
       ArrayBuffer(runOnce.getOrElse("KEY EXTRACTION FAILED"), explorerRun.getOrElse("KEY EXTRACTION FAILED"),
@@ -273,10 +285,25 @@ object VolDiscoveryWindows extends VolParse {
     val dir = new File(mftDir)
     dir.mkdir()
 
+    val csvFileName = "mft_bbs" + Calendar.HOUR + "-" + Calendar.MINUTE + ".csv"
     val mftFileName: String = "mft_bbs" + Calendar.HOUR + "-" + Calendar.MINUTE + ".body"
     // Outputting MFT as body file so it's easily parsed w/ sleuthkit
     Try(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
-      .getOrElse("")
+      .getOrElse(println("Failed to extract mft body file.\n"))
+
+    /*
+    val csv = Try(s"mactime -b $mftFileName -d #> $csvFileName".!!.trim).getOrElse("Mactime CSV Conversion Failed")
+
+    val writer = new PrintWriter(new File(csvFileName))
+
+    /** Write CSV to a file. */
+    writer.write(csv)
+    writer.close()
+    */
+    /**
+      * WRITE TO FILE
+      */
+
     return mftFileName
   } // END extractMFT()
 
@@ -316,10 +343,18 @@ object VolDiscoveryWindows extends VolParse {
     val shimCacheVec = parseOutputDashVec(shimcache)
     val shim2D = vecParse(shimCacheVec.getOrElse(Vector[String]()))
 
-    val shimVec = shim2D.getOrElse(Vector[Vector[String]]())
-      .map(x => ShimCache(x(0) + x(1) + x(2), x(3) + x(4) + x(5), Try(x(6)).getOrElse("") + Try(x(7)).getOrElse("") +
-        Try(x(8)).getOrElse("") + Try(x(9)).getOrElse("") + Try(x(10)).getOrElse("") + Try(x(11)).getOrElse("")))
+    val shimVec: Vector[ShimCache] = shim2D.getOrElse(Vector[Vector[String]]())
+      .map(x => ShimCache(Try(x(0)).getOrElse("") +  " " + Try(x(1)).getOrElse("") + " " + Try(x(2)).getOrElse(""),
+        Try(x(3)).getOrElse("") + " " + Try(x(4)).getOrElse("") + " " + Try(x(5)).getOrElse(""),
+        Try(x(6)).getOrElse("") + " " + Try(x(7)).getOrElse("") + " " + Try(x(8)).getOrElse("") + " " +
+          Try(x(9)).getOrElse("") + " " + Try(x(10)).getOrElse("").trim))
     //index 6
+    // val trimShim = shimVec.map(_.trim)
+    println("Print shimcache column values: \n")
+    for{
+      value <- shimVec
+    } println(value + "\n")
+
 
     return shimVec
   } // END shimCacheEntries()
@@ -411,28 +446,101 @@ object ProcessBbsScan extends VolParse {
     /** Returns Tuple with a map of pid -> info about processes and info about repeatFiles */
     val psScanResult: Vector[ProcessBbs] = psScan(memFile, os)
 
-    val psxviewResult: Vector[Vector[String]] = psxScan(memFile, os)
+    val psList: Vector[ProcessBbs] = psListScan(memFile, os)
+    println("Print psList()")
+    psList.foreach(println)
+    val psListPid = psList.map(x => x.pid)
+    // val psxviewResult: Vector[Vector[String]] = psxScan(memFile, os)
     val psTreeResult: String = psTreeScan(memFile, os)
 
     /** Filter psxviewResult to only those w/ matching PIDs in psscan */
-    val shouldBeHidden: Vector[ProcessBbs] = {
-      psScanResult.filter((x: ProcessBbs) => psxviewResult.exists(y => y.contains(x.pid)))
-    }
-    /** Remove the pids that are hidden from pslist scan so we can combine them later without duplicates */
-    val hiddenRemoved: Vector[ProcessBbs] = {
-      psScanResult.filterNot((x: ProcessBbs) => psxviewResult.exists(y => y.contains(x.pid)))
+    val shouldBeFalse: Vector[ProcessBbs] = {
+      psScanResult.filter((x: ProcessBbs) => psListPid.contains(x.pid))
     }
 
-    val changeHidden = {
-      shouldBeHidden.map((x: ProcessBbs) => ProcessBbs(x.pid, x.offset, x.name, x.ppid, x.timeCreated, hidden = true))
+    println("Printing shouldBeFalse")
+    shouldBeFalse.foreach(println)
+
+
+    val changeNotHidden: Vector[ProcessBbs] = {
+      shouldBeFalse.map((x: ProcessBbs) => ProcessBbs(x.pid, x.offset, x.name, x.ppid, x.timeCreated, hidden = false))
+    }
+
+    /** Combine this with diff and we're set */
+    val diffVec: Vector[ProcessBbs] = psScanResult.diff(shouldBeFalse)
+
+    println("Printing diffVec\n\n")
+    diffVec.foreach(println)
+
+    val hidden = {
+      diffVec.map((x: ProcessBbs) => ProcessBbs(x.pid, x.offset, x.name, x.ppid, x.timeCreated, true))
     }
     val procVector: Vector[ProcessBbs] = {
-      hiddenRemoved ++: changeHidden
+      diffVec ++: changeNotHidden
     }
+    val distinctProcess = distinctBy(procVector)(_.pid)
+    println("Printing the goal result!!!\n\n")
+    distinctProcess.foreach(println)
 
-    return (procVector, psTreeResult)
+    return (distinctProcess, psTreeResult)
   } // END run()
 
+
+
+  /**
+    * Some dumps produce duplicate processes. We want the ones that are true
+    * If I find a dump w/ duplicates that include false, I'll fix the code again.
+    */
+  // import collection.breakOut
+  // implicit def toRich[A, Repr](xs: IterableLike)[String, Repr]) = new RichCollection[, Repr](xs)
+  private[this] def cleanUpProc(vec: Vector[ProcessBbs]): Vector[ProcessBbs] = {
+    val sortByTrue: Vector[ProcessBbs] = vec.sortBy(_.hidden).reverse
+    // println("Sort by hidden result\n\n")
+    // sortByTrue.foreach(println)
+    val distinctByTest: Vector[ProcessBbs] = distinctBy(sortByTrue)(_.pid)
+
+    println("Printing distinct values: \n\nPlease work: \n\n")
+    distinctByTest.foreach(println)
+
+    val resortByHidden = distinctByTest.sortBy(_.hidden)
+    println("Reprinting sortByHidden after distinct")
+    resortByHidden.foreach(println)
+
+    // val vector = Vector.empty
+    // var buff = sortByFalse.head
+/*
+    var i = 0
+
+    def loop(vec: Vector[ProcessBbs], sortByFalse: Vector[ProcessBbs] ): Vector[ProcessBbs] = {
+      // val sortPid = Try(sortByFalse.hea
+      // val vecPids = vec.map(x => x.pid)
+
+      if (sortByFalse.isEmpty) vec
+      else if (vec.exists(x => sortByFalse.map(y => y.pid).contains(x.pid))){
+        println("In else/if statement ")
+        loop(vec.updated(vec.length, sortByFalse.head), sortByFalse.tail)
+      } else
+        loop(vec, sortByFalse.tail)
+    }// END loop()
+
+    loop(vector, sortByFalse.reverse)
+
+
+
+    while(i < sortTail.size ) {
+     //  val pidMap = buff.map(x => x.pid)
+      if(buff.exists(x => sortTail(i).contains(x.pid))) {
+
+        // val proc = new ProcessBbs(sortByPid(i).pid, sortByPid(i).offset, sortByPid(i).name, sortByPid(i).ppid, sortByPid(i).timeCreated, sortByPid(i).hidden)
+        buff += sortTail(i)
+      } // END if
+
+
+    } // END while loop
+*/
+    // return buff.toVector
+    return distinctByTest
+  } // END cleanUpProc()
   /**
     * WARNING!!!
     *
@@ -441,6 +549,141 @@ object ProcessBbsScan extends VolParse {
   /****************************************************************************
     * NEED TO CHANGE LOGIC TO DEAL WITH SPACES!!!!!!!
     ***************************************************************************/
+
+  private[this] def distinctBy[V,E](vec: Vector[V])(f: V => E): Vector[V] = {
+    vec.foldLeft((Vector.empty[V], Set.empty[E])) {
+      case ((acc, set), item) =>
+        val key = f(item)
+        if (set.contains(key)) (acc, set)
+        else (acc :+ item, set + key)
+    }._1
+  } // END distinctBy()
+  private[this] def psListScan(memFile: String, os: String): Vector[ProcessBbs] = {
+
+    println("\n\nRunning pslist...\n\n")
+
+    val psScan: String = Try( s"python vol.py -f $memFile --profile=$os pslist".!!.trim ).getOrElse("")
+    val psScanParse: Vector[String] = parseOutputDashVec( psScan ).getOrElse(Vector[String]())
+    val psScanWithCol: Vector[Vector[String]] = vecParse( psScanParse ).getOrElse( Vector[Vector[String]]() )
+
+    // We are going to skip this for now.
+    // This will be a problem because we need to make sure they have different PIDs.
+    /**
+    // (filename, pid)
+      val psFilenames: Vector[(String, String)] = psScanWithCol.map(x => (x(1), x(2)))
+
+      val repeats = psFilenames.map(x => x._1.toUpperCase())
+        .filterNot(_.contains("SYSTEM32/CSRSS.EXE"))
+        .filterNot(_.contains("SYSTEM32/SVCHOST.EXE"))
+
+      /** Figure out which of the processes are repeated. */
+      val repeatedFiles: Vector[String] = repeats.diff(repeats.distinct).distinct
+
+      if (repeatedFiles.contains("LSASS.EXE")){
+        malwareFound = (true, "lsass.exe")
+      }
+      if (repeatedFiles.contains("SERVICES.EXE")){
+        malwareFound = (true, "Services.exe")
+      }
+
+      // Stored information about repeated files.
+      val repeated: RepeatFiles = RepeatFiles(malwareFound._1, malwareFound._2, repeatedFiles)
+      */
+    val psScanResult: Vector[ProcessBbs] = filterPsScan(psScanWithCol)
+
+    return psScanResult
+  } // END psScan()
+
+  /** Changing the way the map is created to get around */
+  private[this] def filterPsList(vec: Vector[Vector[String]])  = {
+
+    var finalVec = Vector[ProcessBbs]()
+
+    val processVec: Vector[ProcessBbs] = for {
+      row <- vec
+      if row.size >= 7
+    } yield grabProcessList(row)
+
+    /** Remove values w/ empty */
+    val procVec = for{
+      process <- processVec
+      if process.pid != "Empty"
+    } yield process
+
+    val procNoInfo: Vector[ProcessBbs] = for{
+      row <- vec
+      if row.size < 10
+    } yield shortProcessList(row)
+
+    if (procNoInfo.nonEmpty){
+      finalVec = procVec ++: procNoInfo
+      finalVec
+    }else{
+      procVec
+    }
+    /***********************************************
+      * We still need to filter out duplicate pids
+      **********************************************/
+    // return procVec
+  } // filterPsList()
+
+  private[this] def shortProcessList(vector: Vector[String]) = {
+
+    val vec = vector.map(_.toLowerCase)
+
+    if (Try(vec(2).toInt).isSuccess) {
+      ProcessBbs(Try(vec(2).trim).getOrElse("UNKNOWN"), Try(vec(0).trim).getOrElse("0x0"),
+        Try(vec(1).trim).getOrElse("UNKNOWN"), Try(vec(3).trim).getOrElse("0"),
+        Try(vec(8).trim).getOrElse("???") + " " + Try(vec(9).trim).getOrElse("???") + "  " + Try(vec(10)).getOrElse("???"))
+    }else if (Try(vec(3).toInt).isSuccess){
+      ProcessBbs(Try(vec(3).trim).getOrElse("UNKNOWN"), Try(vec(0).trim).getOrElse("0x0"),
+        Try(vec(1).trim).getOrElse("UNKNOWN") + Try(vec(2).trim).getOrElse(""), Try(vec(4).trim).getOrElse("0"),
+        Try(vec(6).trim).getOrElse("???") + " " + Try(vec(7).trim).getOrElse(""))
+    }else{
+      ProcessBbs(Try(vec(2)).getOrElse("UNKNOWN"), Try(vec(0)).getOrElse(""), Try(vec(1).trim).getOrElse(""),
+        Try(vec(3)).getOrElse("0"), "")
+    }
+
+  } // END shortProcess()
+
+  /** Makes sure that we can handle processes that have spaces in their names */
+  private[this] def grabProcessList(vector: Vector[String]): ProcessBbs = {
+
+    val vec = vector.map(_.toLowerCase)
+
+    /** This needs to check if the value at index after the process name is all numbers. */
+
+    if (Try(vec(2).toInt).isSuccess) {
+      ProcessBbs(vec(2).trim, vec(0).trim, vec(1).trim, vec(3).trim, Try(vec(8).trim + " " + vec(9).trim).getOrElse("UNKNOWN"))
+    }
+    else if(Try(vec(3).toInt).isSuccess){
+      ProcessBbs(vec(3).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim, vec(4).trim,
+        Try(vec(9).trim + " " + vec(10).trim).getOrElse("UNKNOWN"))
+    }
+    else if (Try(vec(4).toInt).isSuccess) {
+      ProcessBbs(vec(4).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim,
+        vec(5).trim, Try(vec(10).trim + " " + vec(11).trim).getOrElse("UNKNOWN"))
+    }
+    else if (Try(vec(5).toInt).isSuccess) {
+      ProcessBbs(vec(5).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim,
+        vec(6).trim, Try(vec(11).trim + " " + vec(12).trim).getOrElse("UNKNOWN"))
+    }
+    else if (Try(vec(6).toInt).isSuccess) {
+      ProcessBbs(vec(6).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim +
+        " " + vec(5).trim, vec(7).trim, Try(vec(12).trim + " " + vec(13).trim).getOrElse("UNKNOWN"))
+    }
+    else if (Try(vec(7).toInt).isSuccess) {
+      ProcessBbs(vec(7).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim +
+        " " + vec(5).trim + " " + vec(6).trim, vec(8).trim, Try(vec(13).trim + " " + vec(14).trim).getOrElse("UNKNOWN"))
+    }
+    else if (Try(vec(8).toInt).isSuccess) {
+      ProcessBbs(vec(8).trim, vec(0).trim, vec(1).trim + " " + vec(2).trim + " " + vec(3).trim + " " + vec(4).trim +
+        " " + vec(5).trim + " " + vec(6).trim + " " + vec(7).trim, vec(9).trim,
+        Try(vec(11).trim + " " + vec(12).trim).getOrElse("UNKNOWN"))
+    } // END if statements
+    else ProcessBbs("Empty", "Empty","Empty","Empty", "Empty")
+  } // END grabProcess()
+
 
   private[this] def psScan(memFile: String, os: String): Vector[ProcessBbs] = {
 
@@ -479,7 +722,9 @@ object ProcessBbsScan extends VolParse {
   } // END psScan()
 
   /** Changing the way the map is created to get around */
-  private[this] def filterPsScan(vec: Vector[Vector[String]]): Vector[ProcessBbs]  = {
+  private[this] def filterPsScan(vec: Vector[Vector[String]])  = {
+
+    var finalVec = Vector[ProcessBbs]()
 
     val processVec: Vector[ProcessBbs] = for {
       row <- vec
@@ -491,14 +736,47 @@ object ProcessBbsScan extends VolParse {
       process <- processVec
       if process.pid != "Empty"
     } yield process
+
+    val procNoInfo: Vector[ProcessBbs] = for{
+      row <- vec
+      if row.size < 7
+    } yield shortProcess(row)
+
+    if (procNoInfo.nonEmpty){
+      finalVec = procVec ++: procNoInfo
+      finalVec
+    }else{
+      procVec
+    }
     /***********************************************
       * We still need to filter out duplicate pids
       **********************************************/
-    return procVec
+   // return procVec
   } // filterPsScan()
+
+  private[this] def shortProcess(vector: Vector[String]) = {
+
+    val vec = vector.map(_.toLowerCase)
+
+    if (Try(vec(2).toInt).isSuccess) {
+      ProcessBbs(Try(vec(2).trim).getOrElse("UNKNOWN"), Try(vec(0).trim).getOrElse("0x0"),
+        Try(vec(1).trim).getOrElse("UNKNOWN"), Try(vec(3).trim).getOrElse("0"),
+        Try(vec(5).trim).getOrElse("???") + " " + Try(vec(6).trim).getOrElse("???") + Try(vec(7)).getOrElse("???"))
+    }else if (Try(vec(3).toInt).isSuccess){
+      ProcessBbs(Try(vec(3).trim).getOrElse("UNKNOWN"), Try(vec(0).trim).getOrElse("0x0"),
+        Try(vec(1).trim).getOrElse("UNKNOWN") + Try(vec(2).trim).getOrElse(""), Try(vec(4).trim).getOrElse("0"),
+        Try(vec(6).trim).getOrElse("???") + " " + Try(vec(7).trim).getOrElse(""))
+    }else{
+      ProcessBbs(Try(vec(2)).getOrElse("UNKNOWN"), Try(vec(0)).getOrElse(""), Try(vec(1).trim).getOrElse(""),
+        Try(vec(3)).getOrElse("0"), "")
+    }
+
+
+  } // END shortProcess()
 
   /** Makes sure that we can handle processes that have spaces in their names */
   private[this] def grabProcess(vector: Vector[String]): ProcessBbs = {
+
 
     val vec = vector.map(_.toLowerCase)
 
@@ -571,31 +849,96 @@ object ProcessBbsScan extends VolParse {
     val filtered = for{
       row <- psxWithColumns
       if Try(row(2).toInt).isSuccess
-      if row(3).toLowerCase == "false"
-    } yield row
+    } yield Vector(row(0), row(1), row(2), row(3), row(4))
+
+    val filteredFalse = for{
+      row <- filtered
+      if row(3).toLowerCase.contains("true")
+    }yield Vector(row(0), row(1), row(2), row(3), row(4))
 
     val filtered2 = for{
       row <- psxWithColumns
       if Try(row(3).toInt).isSuccess
-      if row(4).toLowerCase == "false"
-    } yield row
+    } yield Vector(row(0), row(1) + " " + row(2), row(3), row(4), row(5))
+
+    val filtered2False = for{
+      row <- psxWithColumns
+      if row(4).toLowerCase == "true"
+    } yield Vector(row(0), row(1) + " " + row(2), row(3), row(4), row(5))
 
     val filtered3 = for{
       row <- psxWithColumns
       if Try(row(4).toInt).isSuccess
-      if row(5).toLowerCase == "false"
-    } yield row
+    } yield Vector(row(0), row(1) + " " + row(2) + " " + row(3), row(4), row(5), row(6))
+
+
+    val filtered3False = for{
+      row <- psxWithColumns
+      if row(5).toLowerCase == "true"
+    } yield Vector(row(0), row(1) + " " + row(2) + " " + row(3), row(4), row(5), row(6))
 
     val filtered4 = for{
       row <- psxWithColumns
       if Try(row(5).toInt).isSuccess
-      if row(6).toLowerCase == "false"
-    } yield row
+    } yield Vector(row(0), row(1) + " " + row(2) + " " + row(3) + " " + row(4), row(5), row(6), row(7))
 
-    val filterPsx = filtered ++: filtered ++: filtered2 ++: filtered3 ++: filtered4
+    val filtered4False = for{
+      row <- psxWithColumns
+      if row(6).toLowerCase == "true"
+    } yield Vector(row(0), row(1) + " " + row(2) + " " + row(3) + " " + row(4), row(5), row(6), row(7))
+
+    val filterPsx = filteredFalse ++: filteredFalse ++: filtered2False ++: filtered3False ++: filtered4False
+
+    // val fixedContradiction: Vector[Vector[String]] = removeContradictions(filterPsx, psxWithColumns)
+
 
     return filterPsx
   } // psxScan
+
+  /** In the short term, this will work. Eventually need to add a lot of code.*/
+  private[this] def removeContradictions(falseVec: Vector[Vector[String]], psxWithColumns: Vector[Vector[String]]):
+                                                                                            Vector[Vector[String]] = {
+    println("Printing falseVec size" + falseVec.size + "\n\n")
+    /** Get values that have the same name */
+      val theNames = falseVec.filter(x => psxWithColumns.exists(y => y(2) == x(2)))
+    println("Printing the new version of theNames\n")
+    for(value<- theNames)println(value.mkString(","))
+    /*
+    val theNames = for{
+      value <- falseVec
+      if psxWithColumns.exists(x => value(2) == x(2))
+    } yield value
+*/
+    val filterTrue = theNames.filter(x => x(3).toLowerCase.contains("true"))
+    /*
+    val theTrue = for{
+      value <- theNames
+      if value(3).toLowerCase.contains("true")
+    }yield value
+    */
+    val fixContradiction: Vector[Vector[String]] = falseVec.filter(x => filterTrue.exists(y => y(2) == x(2)) )
+
+    println("Printing fixContradiction size" + fixContradiction.size)
+    println("Printing fixContradiction result\n\n")
+    for(value <- fixContradiction) println(value.mkString(","))
+    /*
+    val fixContradiction = for{
+      value <- falseVec
+      if theTrue.exists(x => theTrue.contains(x))
+    } yield value
+
+    println("\n\nPrinting result before removing contradiction from psxview.\n\nLength: " + falseVec.size)
+    for{
+      value <- falseVec
+    }println(value.mkString(","))
+    println("\n\nPrinting result of removing contradiction from psxview result.\n\nLength: " + fixContradiction.size)
+    for{
+      value <- fixContradiction
+    }println(value.mkString(","))
+    // fixContradiction.foreach(println)
+*/
+    return fixContradiction
+  } // END removeContradictions()
 
   private[this] def psTreeScan(memFile: String, os: String): String = {
 
@@ -968,7 +1311,7 @@ object RootkitDetector extends VolParse {
     /** Returns hidden modules found and result of modscan - (hiddenModules, modscanResults) */
     val hiddenModules: (Vector[String], String) = findHiddenModules(memFile, os)
 
-    println("Printing hidden modules:\n")
+    if(hiddenModules._1.nonEmpty) println("Printing hidden modules:\n")
     hiddenModules._1.foreach(println)
     println("Printing modscan results:\n")
     println(hiddenModules._2)
@@ -992,7 +1335,7 @@ object RootkitDetector extends VolParse {
     /** Returns Vector of information about timers to unknown modules */
 
     val timers: Vector[String] = timerScan(memFile, os)
-    println("\nPrinting information about timers to unknown modules:\n\n")
+    if(timers.nonEmpty) println("\nPrinting information about timers to unknown modules:\n\n")
     timers.foreach(println)
 
     val deviceTree: String = deviceTreeScan(memFile, os)
@@ -1000,7 +1343,7 @@ object RootkitDetector extends VolParse {
     // println(deviceTree)
 
     val thread: String = threadScan(memFile, os)
-    println("\nPrinting orphaned threads...\n\n")
+    if(thread.nonEmpty) println("\nPrinting orphaned threads...\n\n")
     println(thread)
 
     var ssdt = false
@@ -1313,6 +1656,7 @@ object RemoteMappedDriveSearch extends VolParse {
 
     println("\nPrinting Remote Mapped Drive Values\n")
     remoteTup.foreach(println)
+
     return remoteTup
 /*
     // Pattern looks for Device\Mup\;[A-Z]:\w+
