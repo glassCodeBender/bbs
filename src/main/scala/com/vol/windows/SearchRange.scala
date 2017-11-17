@@ -1,5 +1,9 @@
 package com.bbs.vol.utils
 
+import java.net.InetAddress
+
+import com.google.common.net.InetAddresses
+
 import scala.util.Try
 
 trait SearchRange {
@@ -11,39 +15,37 @@ trait SearchRange {
 
   } // END ipRange()
 
-  private[this] def ipToLong(value: String): Long = {
-
-    // should have three index locations.
-    val arrValues: Array[String] = value.trim.split('.')
-    val convertToLong: Array[Long] = arrValues.map(x => Try(x.toLong).getOrElse(0L))
-    // 192.160.210.111 1.1.1.1
-    if(value.length > 15 | value.length < 7) {
-      println(s"WARNING: $value is an invalid IP address. Range search failed in convertIpToLong().\n")
+  /** Convert IP address to Long */
+  private[vol] def ipToLong(ip: String): Long = {
+    
+    /** Uses Google's Guava library to avoid DNS lookup costs */
+    val addr: InetAddress = InetAddresses.forString(ip)
+    // val addr = InetAddress.getByName(ip)
+    val ipAddr: Array[Byte] = addr.getAddress
+    var result: Long = 0L
+    for(value <- ipAddr){
+      result <<= 8
+      result |= value & 0xff
     }
+    return result
+  } // END getLong
 
-    val convertBack = convertToLong.map(x => x.toString)
-    /** Since we're using this to check ranges of IPs, I concatenated strings. */
-    val result = convertBack.foldLeft("")((x, y) => x + y)
-
-    return result.toLong
-  } // END ipToBytes()
-
-  def searchHexRange(value: String, start: String, end: String): Boolean = {
+  private[vol] def searchHexRange(value: String, start: String, end: String): Boolean = {
     val bool = searchRange(hex2Long(value), hex2Long(start), hex2Long(end))
 
     return bool
   } // END hexRange()
-  def searchHexRange(value: String, start: Long, end: Long): Boolean = {
+  private[vol] def searchHexRange(value: String, start: Long, end: Long): Boolean = {
     val bool = start to end contains hex2Long(value)
     return bool
   }
-  def searchHexRange(value: Long, start: Long, end: Long): Boolean = {
+  private[vol] def searchHexRange(value: Long, start: Long, end: Long): Boolean = {
 
     val bool = searchRange(value, start, end)
 
   return bool
   }
-  def searchHexRange(value: Long, start: String, end: String): Boolean = {
+  private[vol] def searchHexRange(value: Long, start: String, end: String): Boolean = {
 
     val bool = searchRange(value, hex2Long(start), hex2Long(end))
 
