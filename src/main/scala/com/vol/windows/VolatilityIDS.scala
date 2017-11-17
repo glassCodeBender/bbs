@@ -28,6 +28,7 @@ import java.io.File
 import java.util.Calendar
 
 import com.bbs.vol.processtree._
+import com.bbs.vol.utils.FileFun
 
 import scala.collection.immutable.TreeMap
 import com.bbs.vol.windows.StringOperations._
@@ -35,7 +36,7 @@ import com.bbs.vol.windows.StringOperations._
 import scala.collection.mutable
 import scala.util.Try
 
-object VolatilityIDS {
+object VolatilityIDS extends FileFun {
   /*****************************************************
     ****************************************************
     ******************~~~~~MAIN~~~~*********************
@@ -61,7 +62,7 @@ object VolatilityIDS {
     val fileBool: (Boolean, String) = checkDir( memFile )
 
     /** Check and make sure the memory file is valid */
-    if ( fileBool._1 == false ) {
+    if (fileBool._1) {
       println( "The memory file you entered does not exist.\n\n" +
         s"Check and make sure ${fileBool._2} is the correct file name.\n\nExiting program..." )
       System.exit( 1 )
@@ -96,8 +97,9 @@ object VolatilityIDS {
 
     /** Search for hidden executables. */
     val hiddenExecs = findHiddenExecs(process)
+
     /** Determine overall risk rating for memory image */
-    val riskRating = FindSuspiciousProcesses.run(discoveryResult, processDiscovery)
+    val riskRating = FindSuspiciousProcesses.run(discoveryResult, processDiscovery, hiddenExecs)
 
 
     /** Need to write extract parts of Discovery (proc), and pass it to next section of program. */
@@ -112,10 +114,13 @@ object VolatilityIDS {
   private[this] def parseConfig( ): (String, String) = {
 
     val fileName = System.getProperty("user.dir") + "/" + "bbs_config.txt"
+    val readConfig = readFileTransform(fileName)(y => y.filterNot(x => x.contains("#")))
+    /*
     val src = Source.fromFile( fileName )
     val readConfig = src.getLines.filterNot( _.contains( "#" ) )
       .toVector
     src.close
+    */
 
     val splitUp: Vector[String] = readConfig.flatMap( _.split( "~>" ) )
     val cleanSplit = splitUp.map( _.trim )
@@ -438,7 +443,13 @@ final case class RiskRating(riskRating: Integer)
 /** Class looks at the results of previous scans and determines if indicators of a breach were found. */
 object FindSuspiciousProcesses {
 
-  def run(disc: Discovery, process: ProcessBrain): Int = {
+  def run(disc: Discovery, process: ProcessBrain, hiddenExecs: Vector[String]): Int = {
+
+    /**
+      * MISSING:
+      * Rootkit Analysis
+      * Find Hidden Execs
+      */
 
     /** */
     var riskRating = 0
