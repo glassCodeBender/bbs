@@ -2,12 +2,9 @@ package com.bbs.vol.windows
 
 import com.bbs.vol.utils
 import StringOperations._
-import java.io.File
-import java.io.PrintWriter
+import com.bbs.vol.utils.{CaseTransformations, SearchRange}
 
-import com.bbs.vol.utils.RichCollection
 
-import scala.collection.IterableLike
 
 /**
   * @author J. Alexander
@@ -291,19 +288,6 @@ object VolDiscoveryWindows extends VolParse {
     Try(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
       .getOrElse(println("Failed to extract mft body file.\n"))
 
-    /*
-    val csv = Try(s"mactime -b $mftFileName -d #> $csvFileName".!!.trim).getOrElse("Mactime CSV Conversion Failed")
-
-    val writer = new PrintWriter(new File(csvFileName))
-
-    /** Write CSV to a file. */
-    writer.write(csv)
-    writer.close()
-    */
-    /**
-      * WRITE TO FILE
-      */
-
     return mftFileName
   } // END extractMFT()
 
@@ -438,7 +422,7 @@ object VolDiscoveryWindows extends VolParse {
 // case class RepeatFiles(malwareFound: Boolean, process: String, repeated: Vector[String])
 
 
-object ProcessBbsScan extends VolParse {
+object ProcessBbsScan extends VolParse with CaseTransformations {
 
   /** Functional main method of ProcessBbsScan object */
   private[windows] def run( memFile: String, os: String ): (Vector[ProcessBbs], String) = {
@@ -468,67 +452,15 @@ object ProcessBbsScan extends VolParse {
     val procVector: Vector[ProcessBbs] = {
       diffVec ++: changeNotHidden
     }
+    /** I could use distinct here, but I was too excited about distinctBy to not use it. */
     val distinctProcess = distinctBy(procVector)(_.pid)
+
+    println("Printing cleaned up process list results...\n\n")
+    distinctProcess.foreach(println)
 
     return (distinctProcess, psTreeResult)
   } // END run()
 
-
-
-  /**
-    * Some dumps produce duplicate processes. We want the ones that are true
-    * If I find a dump w/ duplicates that include false, I'll fix the code again.
-    */
-  // import collection.breakOut
-  // implicit def toRich[A, Repr](xs: IterableLike)[String, Repr]) = new RichCollection[, Repr](xs)
-  private[this] def cleanUpProc(vec: Vector[ProcessBbs]): Vector[ProcessBbs] = {
-    val sortByTrue: Vector[ProcessBbs] = vec.sortBy(_.hidden).reverse
-    // println("Sort by hidden result\n\n")
-    // sortByTrue.foreach(println)
-    val distinctByTest: Vector[ProcessBbs] = distinctBy(sortByTrue)(_.pid)
-
-    println("Printing distinct values: \n\nPlease work: \n\n")
-    distinctByTest.foreach(println)
-
-    val resortByHidden = distinctByTest.sortBy(_.hidden)
-    println("Reprinting sortByHidden after distinct")
-    resortByHidden.foreach(println)
-
-    // val vector = Vector.empty
-    // var buff = sortByFalse.head
-/*
-    var i = 0
-
-    def loop(vec: Vector[ProcessBbs], sortByFalse: Vector[ProcessBbs] ): Vector[ProcessBbs] = {
-      // val sortPid = Try(sortByFalse.hea
-      // val vecPids = vec.map(x => x.pid)
-
-      if (sortByFalse.isEmpty) vec
-      else if (vec.exists(x => sortByFalse.map(y => y.pid).contains(x.pid))){
-        println("In else/if statement ")
-        loop(vec.updated(vec.length, sortByFalse.head), sortByFalse.tail)
-      } else
-        loop(vec, sortByFalse.tail)
-    }// END loop()
-
-    loop(vector, sortByFalse.reverse)
-
-
-
-    while(i < sortTail.size ) {
-     //  val pidMap = buff.map(x => x.pid)
-      if(buff.exists(x => sortTail(i).contains(x.pid))) {
-
-        // val proc = new ProcessBbs(sortByPid(i).pid, sortByPid(i).offset, sortByPid(i).name, sortByPid(i).ppid, sortByPid(i).timeCreated, sortByPid(i).hidden)
-        buff += sortTail(i)
-      } // END if
-
-
-    } // END while loop
-*/
-    // return buff.toVector
-    return distinctByTest
-  } // END cleanUpProc()
   /**
     * WARNING!!!
     *
@@ -538,14 +470,7 @@ object ProcessBbsScan extends VolParse {
     * NEED TO CHANGE LOGIC TO DEAL WITH SPACES!!!!!!!
     ***************************************************************************/
 
-  private[this] def distinctBy[V,E](vec: Vector[V])(f: V => E): Vector[V] = {
-    vec.foldLeft((Vector.empty[V], Set.empty[E])) {
-      case ((acc, set), item) =>
-        val key = f(item)
-        if (set.contains(key)) (acc, set)
-        else (acc :+ item, set + key)
-    }._1
-  } // END distinctBy()
+
   private[this] def psListScan(memFile: String, os: String): Vector[ProcessBbs] = {
 
     println("\n\nRunning pslist...\n\n")
@@ -883,51 +808,6 @@ object ProcessBbsScan extends VolParse {
     return filterPsx
   } // psxScan
 
-  /** In the short term, this will work. Eventually need to add a lot of code.*/
-  private[this] def removeContradictions(falseVec: Vector[Vector[String]], psxWithColumns: Vector[Vector[String]]):
-                                                                                            Vector[Vector[String]] = {
-    println("Printing falseVec size" + falseVec.size + "\n\n")
-    /** Get values that have the same name */
-      val theNames = falseVec.filter(x => psxWithColumns.exists(y => y(2) == x(2)))
-    println("Printing the new version of theNames\n")
-    for(value<- theNames)println(value.mkString(","))
-    /*
-    val theNames = for{
-      value <- falseVec
-      if psxWithColumns.exists(x => value(2) == x(2))
-    } yield value
-*/
-    val filterTrue = theNames.filter(x => x(3).toLowerCase.contains("true"))
-    /*
-    val theTrue = for{
-      value <- theNames
-      if value(3).toLowerCase.contains("true")
-    }yield value
-    */
-    val fixContradiction: Vector[Vector[String]] = falseVec.filter(x => filterTrue.exists(y => y(2) == x(2)) )
-
-    println("Printing fixContradiction size" + fixContradiction.size)
-    println("Printing fixContradiction result\n\n")
-    for(value <- fixContradiction) println(value.mkString(","))
-    /*
-    val fixContradiction = for{
-      value <- falseVec
-      if theTrue.exists(x => theTrue.contains(x))
-    } yield value
-
-    println("\n\nPrinting result before removing contradiction from psxview.\n\nLength: " + falseVec.size)
-    for{
-      value <- falseVec
-    }println(value.mkString(","))
-    println("\n\nPrinting result of removing contradiction from psxview result.\n\nLength: " + fixContradiction.size)
-    for{
-      value <- fixContradiction
-    }println(value.mkString(","))
-    // fixContradiction.foreach(println)
-*/
-    return fixContradiction
-  } // END removeContradictions()
-
   private[this] def psTreeScan(memFile: String, os: String): String = {
 
     println("\n\nRunning pstree scan...\n\n")
@@ -947,7 +827,8 @@ final case class NetConnections( pid: String,
                                  srcIP: String,
                                  destIP: String,
                                  destLocal: Boolean = true,  // Is the destination IP address local?
-                                 vnc: Boolean ){              // Check if VNC port 5500 is listening.
+                                 vnc: Boolean,               // Check if VNC port 5500 is listening.
+                                 unknownIP: Boolean ){
   override val toString = {
     s"\n\nPID: $pid\nSource IP: $srcIP\nDestination IP: $destIP\nDestination Local: " +
       s"$destLocal\nVNC Port Found: $vnc\n\n"
@@ -955,7 +836,7 @@ final case class NetConnections( pid: String,
 } // END NetConnections class
 
 /************************* Netscan Object *************************/
-object NetScan extends VolParse {
+object NetScan extends VolParse with SearchRange {
   private[windows] def run( memFile: String, os: String ): (Vector[NetConnections], Vector[PageInfo]) = {
     // SKIPPING netscan for now.
     // val socketsAndConnections: Option[String] = Some( s"python vol.py -f $memFile --profile=$os netscan".!!.trim )
@@ -988,12 +869,12 @@ object NetScan extends VolParse {
     val localConnects = for {
       line <- conn2d
       if line(2).trim.startsWith("198") || line(2).trim.startsWith("172") || line(2).trim.startsWith("10\\.")
-    } yield new NetConnections(line(3), line(1), line(2), destLocal = true, line(2).splitLast(':')(1) == "5800" )
+    } yield new NetConnections(line(3), line(1), line(2), destLocal = true, line(2).splitLast(':')(1) == "5800", true )
 
     val outsideConnects = for {
       line <- conn2d
       if !(line(2).trim.startsWith("198.") || line(2).trim.startsWith("172.") || line(2).trim.startsWith("10."))
-    } yield new NetConnections(line(3), line(1), line(2), destLocal = false, line(2).splitLast(':')(1) == "5800" )
+    } yield new NetConnections(line(3), line(1), line(2), destLocal = false, line(2).splitLast(':')(1) == "5800", checkKnownIps(line(2)) )
     // NEED index 1 (local address), 2 (Dest IP AND PORT) and 3 (PID)
 
     val connInfo: Vector[NetConnections] = outsideConnects ++: localConnects
@@ -1001,9 +882,11 @@ object NetScan extends VolParse {
     return (connInfo, outsideConnects)
   } // END connScan()
 
-  /****************************************************************************
-    * THIS IS WRONG!!!!!!!!
-    ***************************************************************************/
+  private[this] def checkKnownIps(ip: String): Boolean = {
+
+
+    false
+  } // END checkKnownIps
 
   /** Loop through all outside ip addresses and return whois info
     * I'll filter the output when the rest of the program is done and I have free time.
@@ -1025,6 +908,8 @@ object NetScan extends VolParse {
 
     println(s"Performing whois lookup for ip address: $ipAddr")
     val whois = new WhoIs(ipSplit(0))
+
+    // check if IP address is from Microsoft, Apple, a backbone network provider, or other common subnets
 
     val whoisResult = Try(whois.query()).getOrElse(PageInfo("Connection Failed.","Connection failed", "", "", "", "", "", "", ""))
     println("Printing whois result... ")
