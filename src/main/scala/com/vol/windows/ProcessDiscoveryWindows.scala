@@ -1,6 +1,9 @@
 package com.bbs.vol.windows
 
+import java.math.BigInteger
+
 import StringOperations._
+import com.bbs.vol.utils.SearchRange
 
 /**
   * Main Class: ProcessDiscoveryWindows
@@ -11,8 +14,6 @@ import StringOperations._
   * DetectRegPersistence object
   * DetectUnlinkedDLLs object
   */
-
-// import com.bigbrainsecurity.utils.nlp.StringOperations._
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -58,9 +59,9 @@ final case class YaraBrain( url: Vector[YaraParseString],     // URLs present in
                             suspItems: YaraSuspicious,        // antidebug, exploitkits, webshells, cve,
                                                               // malicious documents, suspicious strings.
                             crypto: Vector[YaraParse],        // Cryptography signatures found in process memory.
-                            dllInHexRange: Vector[ArrayBuffer[(String, Int)]] )
+                            dllInHexRange: ArrayBuffer[ArrayBuffer[String]])
 
-final case class DllHexInfo(pid: String, dllName: String, lowHex: Int, highHex: Int){
+final case class DllHexInfo(pid: String, dllName: String, lowHex: Long, highHex: Long){
   override def toString = "pid: " + pid + " dll name: " + dllName + " low hex: " + lowHex + " high hex: " + highHex
 } // END case class DLLHexInof
 
@@ -91,6 +92,12 @@ case class Privileges( pid: String,
 
 object ProcessDiscoveryWindows extends VolParse {
 
+  /****************************************************
+    ***************************************************
+    ******************~~~~~RUN~~~~*********************
+    ***************************************************
+    ***************************************************/
+
   private[windows] def run(os: String, memFile: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
 
     /**
@@ -103,8 +110,16 @@ object ProcessDiscoveryWindows extends VolParse {
     val (dllInfo, ldrInfo): (Vector[DllInfo], Vector[LdrInfo]) = DllScan.run(os, memFile, process)
     println("\n\nPrint DLL Info: \n\n")
     dllInfo.foreach(println)
-    println("\n\nPrint LDR Info: \n\n")
-    ldrInfo.foreach(println)
+    // println("\n\nPrint LDR Info: \n\n")
+    // ldrInfo.foreach(println)
+
+    /**
+      * NEED TO PASS Vector[DllInfo] to yarascan
+      */
+
+    /** Perform all yarascans*/
+    println("\n\nScanning memory with yara...\n\n")
+    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, process, netConn, dllInfo)
 
     /** Determine all parents that a process inherits from. */
     // val parents: Vector[(String, Vector[(String, String)])] = for(pid <- pidVec) yield getParents(pid, process)
@@ -143,7 +158,7 @@ object ProcessDiscoveryWindows extends VolParse {
     println("\n\nPrinting information about promiscuous mode...\n\n")
     for((key, bool) <- promiscMap)println(key + " -> " + bool)
 
-    println("\n\nScanning to determine enabled privileges...\n\n")
+    println("\n\nScanning for explicitly enabled privileges...\n\n")
 
     /** Only gives privileges that a process specifically enabled. */
     val enabledPrivs: Vector[Privileges] = {
@@ -151,13 +166,7 @@ object ProcessDiscoveryWindows extends VolParse {
     }
     enabledPrivs.foreach(println)
 
-    /**
-      * NEED TO PASS Vector[DllInfo] to yarascan
-      */
 
-    /** Perform all yarascans*/
-      println("\n\nScanning memory with yara...\n\n")
-    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, process, netConn, dllInfo)
 
     /** Perform malfind scan*/
     val malfind: Map[String, String] = malfindScan(memFile, os, process)
@@ -196,7 +205,6 @@ object ProcessDiscoveryWindows extends VolParse {
     /** Returns the ppid of pid as the first value in Vector */
     val directParent = for {
       pidVal <- pids
-      if pidVal.ppid.nonEmpty
       if pidVal.pid == pid
     } yield (pidVal.ppid, pidVal.name)
     val parentParent = for{
@@ -348,7 +356,7 @@ object ProcessDiscoveryWindows extends VolParse {
 
     // Need to research more privileges to add to this list.
 
-    println("\n\nSearching for explicitly enabled privileges...\n\n")
+    // println("\n\nSearching for explicitly enabled privileges...\n\n")
 
     /** Contains Vector of privileges that could be significant if enabled.*/
     val significantPrivs: Vector[String] = Vector( "SeDebugPrivilege", "SeLoadDrivePrivilege", "SeBackupPrivilege",
@@ -447,7 +455,7 @@ final case class YaraSuspicious(packers: Vector[YaraParse],
 /****************************************************************************************************/
 /****************************************************************************************************/
 
-object AutomateYara extends VolParse {
+object AutomateYara extends VolParse with SearchRange {
   private[windows] def run( os: String,
            memFile: String,
            process: Vector[ProcessBbs],
@@ -460,14 +468,21 @@ object AutomateYara extends VolParse {
 
     // (pid, destination IP)
     val netOutgoing: Vector[(String, String)] = net.filter( _.destLocal == false ).map(x => (x.pid, x.destIP))
-    val pids: Vector[String] = process.map(x => (x.pid))
+    val netIncoming = net.filter(_.destLocal).map(x => (x.pid, x.destIP))
+
+    val pids: Vector[String] = process.map(x => x.pid)
     val netPids = netOutgoing.map(_._1)
 
     /** Filter dllInfo so it only contains processes w/ outgoing connections. */
     val locateDll: Vector[Vector[DllHexInfo]] = for{
       dllInfo <- allDllInfo
-      if dllInfo.exists(x => netPids.contains(x))
+      if dllInfo.exists(x => netPids.contains(x.pid))
     } yield dllInfo
+
+    val flatLocateDll: Vector[DllHexInfo] = locateDll.flatten
+
+    println("Attempting to flatten locateDll...\n\n")
+    flatLocateDll.foreach(println)
 
     // (pid -> Pertinent yara info )
     val ipCheck: Vector[(String, Vector[YaraParse])] = {
@@ -478,27 +493,32 @@ object AutomateYara extends VolParse {
       * NEED TO TEST!!!
       */
 
-    /** Vector of Array that contains offsets */
-    val ipOffset: Vector[Vector[Int]] = ipCheck.map(x => x._2.map(y => hex2Int(y.offset)))
+    /** Vector of Array that contains offsets. I THINK THIS WORKS! */
+    val ipOffset: Vector[Vector[String]] = ipCheck.map(x => x._2.map(y => y.offset))
 
+    println("Printing IP offsets\n\n")
     for{
       value <- ipOffset
       result <- value
     } println("Offset: " + result)
 
+    val flatOffset: Vector[String] = ipOffset.flatten
+    println("Testing out flatOffset...\n\n")
+    flatOffset.foreach(println)
 
     /*******************************
       * MAJOR LOGIC PROBLEM HERE!!
       * While loop would be easier.
       * Make separate method.
       ******************************/
-    val searchHex: Vector[ArrayBuffer[(String, Int)]] = for {
-      eachDll <- locateDll
-      value <- ipOffset
-    } yield searchHexRange(eachDll, value)
 
+    val searchHex = searchRange(flatLocateDll, flatOffset)
+      /** This is a miracle method... if it actually works... */
+    // val searchHex: Vector[Vector[String]] = searchAll(locateDll, flatOffset)
+
+    println("\n\nTIME FOR THE ULTIMATE TEST OF THE HEX WORK!!!!\n\n")
     for{ value <- searchHex
-         result <- value } println(result._1 + " " + result._2 )
+         result <- value } println(result(1) + " " + result(2) + result(3) )
     // searchHexRange.foreach(println)
 
     println("\n\nScanning for URLs with yara...\n\n")
@@ -568,65 +588,42 @@ object AutomateYara extends VolParse {
 
     ipResult
   } // END runIp()
-/*
-  /** Find which DLLs contain memory locations that call to outgoing IP address. */
-  private[this] def locateDllForIp(memFile: String, os: String, pid: String): Vector[DllHexInfo] = {
-    val dllList = Some( s"python vol.py -f $memFile --profile=$os -p $pid dlllist".!!.trim )
 
-    val parsed: Option[Vector[String]] = parseOutputDashVec(dllList.getOrElse(""))
-
-    val parse2d: Option[Vector[Vector[String]]] = vecParse(parsed.getOrElse(Vector[String]()))
-    val pertinentInfo: Option[Vector[Vector[String]]] = {
-      parse2d.map(x => Vector(x(0), x(1), x(3)))
-    }
-    val parsedPertInfo = pertinentInfo.getOrElse(Vector[Vector[String]]())
-
-    val hexRange: Vector[DllHexInfo] = for {
-      line <- parsedPertInfo
-    } yield DllHexInfo(pid, line(2), hex2Int(line(0)), hex2Int(line(0)) + hex2Int(line(1)))
-
-    hexRange.foreach(println)
-
-    return hexRange
-  } // END locateDllForIp()
-*/
-  private[this] def hex2Int(hex: String): Int = {
-    Integer.parseInt(hex.drop(2), 16)
+  /** Convert hexidecimal value to Long */
+  private[this] def hex2Int(hex: String): Long = {
+    val bigInt = new BigInteger(hex.drop(2), 16)
+    return bigInt.longValue()
     // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
   }
 
-  /**********************************************************************
-    ***** FIX THIS!! LOGIC PROBLEM HERE!!!
-    **********************************************************************/
-
   /** Search hex ranges for DLLs inside them. */
-  private[this] def searchHexRange(dllHex: Vector[DllHexInfo], hexSearch: Vector[Int]): ArrayBuffer[(String, Int)] = {
+  private[this] def searchRange(dllHex: Vector[DllHexInfo], hexItem: Vector[String]): ArrayBuffer[ArrayBuffer[String]] = {
 
+    println("Running searchRange()\n\n")
     var i = 0
     var j = 0
-    var buff = ArrayBuffer[(String, Int)]()
-    while (i < dllHex.length){
-      j = 0
-      while(j < hexSearch.length){
-        if( dllHex(i).lowHex to dllHex(i).highHex contains hexSearch(j)){
-          val tup = (dllHex(i).dllName, hexSearch(j))
-          buff += tup
-        }
+    var buff = ArrayBuffer[ArrayBuffer[String]]()
 
+    var bool = false
+
+    while (i < hexItem.length){
+      j = 0
+      while(j < dllHex.length){
+        bool = searchHexRange(hexItem(i), dllHex(j).lowHex, dllHex(j).highHex)
+        if(bool){
+          /** SHOULD CLEAN UP hexItem!!! */
+            println(s"Searching for ${hexItem(i)} between ${dllHex(j)} and ${dllHex(j)}\n")
+          val hexLong = Try(hexItem(i).toLong).getOrElse(0L)
+          val tup = ArrayBuffer(dllHex(j).dllName, dllHex(j).pid, "0x" + hexLong.toHexString )
+          buff ++: tup
+        }
         j = j + 1
       }
       i = i + 1
     } // END while
 
-    for(value <- buff) println("Dll Name: " + value._1 + "\nOffset: " + value._2)
+    for(value <- buff) println("PID: " + value(1) + "Dll Name: " + value(0) + "\nOffset: " + value(3))
 
-    /*
-    val result: Array[(String, Int)] = for{
-      value <- hexSearch
-      hexInfo <- dllHex
-      if hexInfo.lowHex to hexInfo.highHex contains value
-    } yield (hexInfo.dllName, value)
-*/
     return buff
   } // END searchHexRange
 
@@ -747,7 +744,7 @@ object AutomateYara extends VolParse {
     val ipNoPort = ip.splitLast(':')(0)
 
     if (pids.contains(pid)){
-      println(s"finding IPs for $pid with $ipNoPort...\n\n")
+      println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
 
       yaraByIp = {
         Try( s"python vol.py -f $memFile --profile=$os yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
@@ -1168,8 +1165,10 @@ object DllScan extends VolParse {
     /** We want to find each process that has a False value in it.
       * We also want to look for executables w/ no Mapped Path */
 
+    /**
     // regex to find exec w/ no mapped path. NOT USED IN CODE!!
-    val noMappedPath = """.\\.\\.""".r
+    */
+    val noMappedPath = ".*\\.\\.".r
 
     var ldr = ""
     if(hid)
@@ -1207,10 +1206,10 @@ object DllScan extends VolParse {
     } yield prob
 
     if(cleanedProbs.nonEmpty){
-      println("Printing hidden DLL that was found...")
+      println("\nPrinting hidden DLL that was found...")
       cleanedProbs.foreach(println)
+      println("")
     }
-
 
     val pattern = "0x\\w+".r
     val baseLocations: Vector[String] = cleanedProbs.map(x => pattern.findFirstIn(x).getOrElse(""))
@@ -1219,8 +1218,11 @@ object DllScan extends VolParse {
     // val nameLine = cleanedProbs.filter(_.contains("mem"))
     val dllName = cleanedProbs.map(x => dllPattern.findFirstIn(x).getOrElse(""))
 
-    println("Printing hidden DLL Name: ")
-    for(name <- dllName) println("Hidden DLL: " + name)
+    if(cleanedProbs.nonEmpty){
+      println("\nPrinting hidden DLL Name: ")
+      for(name <- dllName) println("Hidden DLL: " + name)
+      println("")
+    }
 
     LdrInfo(pid, baseLocations, cleanedProbs, dllName, meterBool)
   } // ldrScan()
@@ -1245,7 +1247,7 @@ object DllScan extends VolParse {
     val dllWithRemoveIAT = filterDLL.filterNot(_.contains("0xffff"))
 
     val dllWithProcRemoved: Vector[String] = dllWithRemoveIAT.filter(x => x.toLowerCase.contains(".dll"))
-    //val dllString: String = dllWithProcRemoved.mkString("\n")
+
 
     /** RETURN Statement
       * We want to know pid, memory range, and commandline stuff. */
@@ -1279,14 +1281,16 @@ object DllScan extends VolParse {
       line <- pertinentInfo
     } yield new DllHexInfo(pid, Try(line(2)).getOrElse("0"),
                 Try(hex2Int(line(0))).getOrElse(0),
-                Try(hex2Int(line(0))).getOrElse(0) + Try(hex2Int(line(1))).getOrElse(0) )
+                Try(hex2Int(line(0))).getOrElse(0L) + Try(hex2Int(line(1))).getOrElse(0L) )
 
     return hexRange
   } // END locateDll()
 
   /** convert hex memory location to an integer. */
-  private[this] def hex2Int(hex: String): Int = {
-    Integer.parseInt(hex.drop(2), 16)
+  private[this] def hex2Int(hex: String): Long = {
+    val bigInt = new BigInteger(hex.drop(2), 16)
+
+    return bigInt.longValue()
     // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
   } // END hex2Int
 
