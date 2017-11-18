@@ -34,6 +34,7 @@ import scala.collection.immutable.TreeMap
 import com.bbs.vol.windows.StringOperations._
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
 object VolatilityIDS extends FileFun {
@@ -46,18 +47,27 @@ object VolatilityIDS extends FileFun {
 
     // Need to read in user input from a config file.
 
-    val (os, memFile) = parseConfig()
+    val config: Vector[String] = parseConfig()
+
+    val memFile = config(0)
+    val os = config(1)
+    var kdbg: String = ""
+    var yara1: Option[String] = None
+    var yara2: Option[String] = None
+    var yara3: Option[String] = None
+    var yara4: Option[String] = None
+
+    /** Allows users to add new yara rules. */
+    if(config(2) != "3") kdbg = config(2)
+    /** We can put these in a data structure and flatten them. */
+    if(config(3) != "4") yara1 = Some(config(3))
+    if(config(4) != "5") yara2 = Some(config(4))
+    if(config(3) != "4") yara1 = Some(config(5))
+    if(config(4) != "5") yara2 = Some(config(6))
 
     /**
       * Check and make sure valid file extension
       */
-
-    // when we read in the config file, we need to make sure memFile doesn't have spaces in it.
-    // If it does, we need to add quotes around it.
-
-    if ( os.startsWith( "WinXP" ) || os.startsWith( "Win2003" ) ) {
-
-    }
 
     val fileBool: (Boolean, String) = checkDir( memFile )
 
@@ -69,7 +79,7 @@ object VolatilityIDS extends FileFun {
     }
 
     /** This will be replaced w/ a timer if I have time. */
-    val kdbg = checkKDBG( memFile )
+    if (kdbg.nonEmpty) kdbg = findKdbg( memFile, os )
 
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
     val dumpDir = mkDir( memFile )
@@ -111,7 +121,7 @@ object VolatilityIDS extends FileFun {
   /****************************************************************************************/
 
   /** Parses the config file. */
-  private[this] def parseConfig( ): (String, String) = {
+  private[this] def parseConfig( ): Vector[String] = {
 
     val fileName = System.getProperty("user.dir") + "/" + "bbs_config.txt"
     val readConfig = readFileTransform(fileName)(y => y.filterNot(x => x.contains("#")))
@@ -130,9 +140,96 @@ object VolatilityIDS extends FileFun {
         "\nThe configuration file was successfully read...\n\nRunning the program..." )
     }  else System.exit( 1 )
 
-    return (cleanSplit(1), cleanSplit(3))
+    return Vector(Try(cleanSplit(1)).getOrElse("1"), Try(cleanSplit(3)).getOrElse("2"),
+      Try(cleanSplit(5)).getOrElse("3"), Try(cleanSplit(7)).getOrElse("4"), Try(cleanSplit(9)).getOrElse("5"))
   } // END parseConfig()
 
+  /**
+    * Find Kdbg offset
+    *
+    * Need to run kdbg only if the value isn't input in config file.
+    */
+  private[windows] def findKdbg(memFile: String, os: String): String = {
+
+    /** Need to grab kdbg block to deal with LOTS OF BUGS!!! */
+    val kdbgStr = Try(s"python vol.py -f $memFile --profile=$os kdbgscan").getOrElse("Failed")
+
+    val kdbgVec = Source.fromString(kdbgStr).getLines.toVector
+
+    /** Split on the different outputs */
+    val splitOnKdbg: Vector[Array[String]] = {
+      kdbgVec.map(x => x.split("""**************************************************"""))
+    }
+
+    /** Split on name */
+    val splitOnName: Vector[Array[String]] = kdbgVec.map( x => x.split("""KDBGHeader""") )
+    // Now we need to find the following offset
+
+    val memLocOffset = "0x".r
+    /** Since we need the profile to line up, we use Win or Vista. Win almost always works. */
+    val osReg = "(Win|VistaSP).+".r
+
+    /** Get Vector[Array[memLocations]] */
+    val memLoc: Vector[Option[String]] = for{
+      value <- splitOnKdbg
+      line <- value
+    } yield memLocOffset.findFirstIn(line)
+
+    val profileName: Vector[Option[String]] = for{
+      value <- splitOnName
+      line <- value
+    }yield osReg.findFirstIn(line)
+
+    /** Buffer to store offsets that match up */
+    var buff = ArrayBuffer[String]()
+
+    var i = 0
+    while(i < memLoc.length){
+      /** This won't line up. */
+      if(profileName(i).getOrElse("") == memFile) buff + memLoc(i).getOrElse("")
+
+      i = i + 1
+    } // END while
+
+    /** In case there are multiple matches, we want to find the most common value. */
+    val mostCommonMemLoc: String = buff.groupBy(identity).maxBy(_._2.size)._1
+
+    println(s"\n\nDetermined that the kdbg block is $mostCommonMemLoc. If the program has run, you might need to determine" +
+      s"the kdbg block manually and set it in the config file.\n\n")
+
+    mostCommonMemLoc
+
+    // findFirstIn for each to get memLocs
+
+    // Then we need to split on "KDBGHeader" and then from index(1) grab the word that starts with Win
+
+
+    /** Going to worry about this code later. */
+    /*
+    import scala.sys.process.{Process, ProcessLogger}
+
+    var (iiOut, iiErr) = ("", "")  // for collecting Process output
+    val getii = Process(s"python vol.py -f $memFile imageinfo")
+      .run(ProcessLogger(iiOut += _, iiErr += _))
+
+
+    // . . .
+    // do other useful stuff
+    // or set a timeout alarm and wait for it
+    // . . .
+
+    val imageInfo: Option[String] =
+      if (getii.isAlive()) {
+        // report failure
+        getii.destroy()
+        Some(iiOut.trim)
+      } else if (getii.exitValue() != 0 || iiErr != "") {
+        // report failure
+        None
+      } else
+        Some(iiOut.trim)
+*/
+  } // END findKdbg()
   /** Creates a directory where we'll store log, prefetch, and pcap info in txt files */
   private[windows] def mkDir(memFile: String): String = {
     val cal = Calendar.getInstance()
@@ -166,7 +263,7 @@ object VolatilityIDS extends FileFun {
 
     return (fileBool, currentDir)
   } // END checkDir
-
+/*
   /** Checking to make sure the memory dump provided isn't corrupted. This will probably be removed soon. */
   private[this] def checkKDBG( memFile: String ) = {
 
@@ -184,7 +281,7 @@ object VolatilityIDS extends FileFun {
     val imageInfo = Some("")
     print(imageInfo.getOrElse(""))
   }
-
+*/
   /** Looks for hidden executables. */
   private[this] def findHiddenExecs(vec: Vector[ProcessBbs]): Vector[String] = {
 
@@ -736,7 +833,25 @@ object FindSuspiciousProcesses {
 
   } // END checkRootkitResults
 
-  private[this] def checkRegistry(root: (Vector[String], Vector[String])) = {
+  private[this] def checkRegistry(vec: Vector[RegPersistenceInfo]) = {
+
+
+    var riskRating = 0
+    var reportStr = ""
+    val regHandles: Vector[RegistryHandles] = vec.map(x => x.handles)
+
+    val count: Vector[(String, Int)] = regHandles.map(x => (x.pid, x.runCount))
+    val filterCount = count.filter(_._2 > 3)
+
+    if (filterCount.nonEmpty){
+      reportStr = "\n\tDuplicate run keys are an indication that an attacker used the registry to establish persistence.\n"
+      for(values <- filterCount) println(s"\t${values._2} links to the run key were found in PID: ${values._1}")
+      if(filterCount.exists(x => x._2 > 8)) {
+        println(s"\n\n\tWe have determined that an attacker used the run key to establish registry persistence.\n")
+        riskRating = 100
+      }
+      else riskRating = 50
+    }
 
 
   } // END checkRegistry()
