@@ -51,20 +51,23 @@ object VolatilityIDS extends FileFun {
 
     val memFile = config(0)
     val os = config(1)
-    var kdbg: String = ""
+    var kdbg: String = config(2)
     var yara1: Option[String] = None
     var yara2: Option[String] = None
     var yara3: Option[String] = None
     var yara4: Option[String] = None
 
-    /** Allows users to add new yara rules. */
-    if(config(2) != "3") kdbg = config(2)
-    /** We can put these in a data structure and flatten them. */
-    if(config(3) != "4") yara1 = Some(config(3))
-    if(config(4) != "5") yara2 = Some(config(4))
-    if(config(3) != "4") yara1 = Some(config(5))
-    if(config(4) != "5") yara2 = Some(config(6))
 
+    /** We can put these in a data structure and flatten them. */
+    if(config(3).nonEmpty) yara1 = Some(config(3))
+    if(config(4).nonEmpty) yara2 = Some(config(4))
+    if(config(3).nonEmpty) yara1 = Some(config(5))
+    if(config(4).nonEmpty) yara2 = Some(config(6))
+
+    if(kdbg.nonEmpty){
+      val cwd = System.getProperty("user.dir")
+      writeToFile(cwd + "user_config.txt", s"[DEFAULT]\nPROFILE=$os\nLOCATION=file:///$cwd\nKDBG=$kdbg")
+    }
     /**
       * Check and make sure valid file extension
       */
@@ -78,14 +81,11 @@ object VolatilityIDS extends FileFun {
       System.exit( 1 )
     }
 
-    /** This will be replaced w/ a timer if I have time. */
-    if (kdbg.nonEmpty) kdbg = findKdbg( memFile, os )
-
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
     val dumpDir = mkDir( memFile )
 
     /** Broadly examine image for malicious behavior. */
-    val discoveryResult: Discovery = VolDiscoveryWindows.run( memFile, os, dumpDir )
+    val discoveryResult: Discovery = VolDiscoveryWindows.run( memFile, os, kdbg, dumpDir )
 
     /** discoveryResult Contains:
       *
@@ -134,16 +134,17 @@ object VolatilityIDS extends FileFun {
 
     val splitUp: Vector[String] = readConfig.flatMap( _.split( "~>" ) )
     val cleanSplit = splitUp.map( _.trim )
-    if ( cleanSplit.size == 4 ) {
+    if ( cleanSplit.size >= 4 ) {
       println( "\n\nWelcome to the Big Brain Security Volatile IDS! \n" +
         "\nReading bbs_config.txt file to determine your settings...\n\n" +
         "\nThe configuration file was successfully read...\n\nRunning the program..." )
     }  else System.exit( 1 )
 
+    println("Printing kdbg:" + Try(cleanSplit(5)).getOrElse("failed"))
     return Vector(Try(cleanSplit(1)).getOrElse("1"), Try(cleanSplit(3)).getOrElse("2"),
-      Try(cleanSplit(5)).getOrElse("3"), Try(cleanSplit(7)).getOrElse("4"), Try(cleanSplit(9)).getOrElse("5"))
+      Try(cleanSplit(5)).getOrElse(""), Try(cleanSplit(7)).getOrElse(""), Try(cleanSplit(9)).getOrElse(""))
   } // END parseConfig()
-
+/*
   /**
     * Find Kdbg offset
     *
@@ -151,34 +152,63 @@ object VolatilityIDS extends FileFun {
     */
   private[windows] def findKdbg(memFile: String, os: String): String = {
 
+    val strBuilder = new StringBuilder()
     /** Need to grab kdbg block to deal with LOTS OF BUGS!!! */
-    val kdbgStr = Try(s"python vol.py -f $memFile --profile=$os kdbgscan").getOrElse("Failed")
+    val kdbg: String = Seq("python","vol.py", "-f", memFile, s"--profile=$os", "kdbgscan").!!.trim
 
+
+    println("printing stream as test.\n")
+
+    kdbg.foreach(println)
+    val kdbgStr = kdbg.toString
+
+    println("Printing kdbgStr\n" + kdbgStr)
     val kdbgVec = Source.fromString(kdbgStr).getLines.toVector
 
     /** Split on the different outputs */
     val splitOnKdbg: Vector[Array[String]] = {
-      kdbgVec.map(x => x.split("""**************************************************"""))
+      kdbgVec.map(x => x.split("""\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*"""))
     }
+
+    println("Printing splitOnKdbg")
+    splitOnKdbg.foreach(println)
 
     /** Split on name */
     val splitOnName: Vector[Array[String]] = kdbgVec.map( x => x.split("""KDBGHeader""") )
     // Now we need to find the following offset
+
+
+    println("Printing splitOnName:")
+    for{
+      value <- splitOnName
+      row <- value
+    }println(row)
 
     val memLocOffset = "0x".r
     /** Since we need the profile to line up, we use Win or Vista. Win almost always works. */
     val osReg = "(Win|VistaSP).+".r
 
     /** Get Vector[Array[memLocations]] */
-    val memLoc: Vector[Option[String]] = for{
+    val memLoc: Vector[String] = for{
       value <- splitOnKdbg
       line <- value
-    } yield memLocOffset.findFirstIn(line)
+    } yield memLocOffset.findFirstIn(line).getOrElse("Failed")
 
-    val profileName: Vector[Option[String]] = for{
+    println("printing memLoc")
+    for{
+      value <- memLoc
+    } println(value)
+
+
+    val profileName: Vector[String] = for{
       value <- splitOnName
       line <- value
-    }yield osReg.findFirstIn(line)
+    } yield osReg.findFirstIn(line).getOrElse("FAILED")
+
+    println("printing profileName")
+    for{
+      value <- memLoc
+    } println(value)
 
     /** Buffer to store offsets that match up */
     var buff = ArrayBuffer[String]()
@@ -186,13 +216,15 @@ object VolatilityIDS extends FileFun {
     var i = 0
     while(i < memLoc.length){
       /** This won't line up. */
-      if(profileName(i).getOrElse("") == memFile) buff + memLoc(i).getOrElse("")
+      if(profileName(i) == memFile) buff + memLoc(i)
 
       i = i + 1
     } // END while
+    println("Printing buff as a test...\n\n")
+    buff.foreach(println)
 
     /** In case there are multiple matches, we want to find the most common value. */
-    val mostCommonMemLoc: String = buff.groupBy(identity).maxBy(_._2.size)._1
+    val mostCommonMemLoc: String = buff.filterNot(_.equals("Failed")).groupBy(identity).maxBy(_._2.length)._2(0)
 
     println(s"\n\nDetermined that the kdbg block is $mostCommonMemLoc. If the program has run, you might need to determine" +
       s"the kdbg block manually and set it in the config file.\n\n")
@@ -230,6 +262,8 @@ object VolatilityIDS extends FileFun {
         Some(iiOut.trim)
 */
   } // END findKdbg()
+
+  */
   /** Creates a directory where we'll store log, prefetch, and pcap info in txt files */
   private[windows] def mkDir(memFile: String): String = {
     val cal = Calendar.getInstance()
