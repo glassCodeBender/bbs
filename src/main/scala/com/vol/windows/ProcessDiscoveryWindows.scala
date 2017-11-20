@@ -908,10 +908,10 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findPackers(memFile: String, os: String, kdbg: String):  Vector[YaraParse] = {
     var str = ""
     if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y packers_rule.yar".!!.trim )
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-file=packers_rule.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y packers_rule.yar".!!.trim )
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-file=packers_rule.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -1372,9 +1372,9 @@ object DllScan extends VolParse {
     var dllList = ""
     if(kdbg.nonEmpty){
       if (hid)
-        dllList = Try( s"python vol.py --conf-file=user_conf.txt dlllist --offset=$offset".!!.trim ).getOrElse("")
+        dllList = Try( s"python vol.py --conf-file=user_config.txt dlllist --offset=$offset".!!.trim ).getOrElse("")
       else
-        dllList = Try( s"python vol.py --conf-file=user_conf.txt dlllist -p $pid".!!.trim ).getOrElse("")
+        dllList = Try( s"python vol.py --conf-file=user_config.txt dlllist -p $pid".!!.trim ).getOrElse("")
     }else{
       if (hid)
         dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist --offset=$offset".!!.trim ).getOrElse("")
