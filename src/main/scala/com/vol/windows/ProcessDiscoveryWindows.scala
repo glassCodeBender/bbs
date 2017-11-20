@@ -98,7 +98,7 @@ object ProcessDiscoveryWindows extends VolParse {
     ***************************************************
     ***************************************************/
 
-  private[windows] def run(os: String, memFile: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
+  private[windows] def run(os: String, memFile: String, kdbg: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
 
     /**
       * LOGIC NEEDS TO BE DIFFERENT NOW THAT WE'RE LOOKING AT OFFSETS.
@@ -107,7 +107,7 @@ object ProcessDiscoveryWindows extends VolParse {
     val pidVec: Vector[String] = process.map(x => x.pid).distinct
 
     /** Need to reorganize the data */
-    val (dllInfo, ldrInfo): (Vector[DllInfo], Vector[LdrInfo]) = DllScan.run(os, memFile, process)
+    val (dllInfo, ldrInfo): (Vector[DllInfo], Vector[LdrInfo]) = DllScan.run(os, memFile, kdbg, process)
     println("\n\nPrint DLL Info: \n\n")
     dllInfo.foreach(println)
     // println("\n\nPrint LDR Info: \n\n")
@@ -119,7 +119,7 @@ object ProcessDiscoveryWindows extends VolParse {
 
     /** Perform all yarascans*/
     println("\n\nScanning memory with yara...\n\n")
-    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, process, netConn, dllInfo)
+    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, kdbg, process, netConn, dllInfo)
 
     /** Determine all parents that a process inherits from. */
     // val parents: Vector[(String, Vector[(String, String)])] = for(pid <- pidVec) yield getParents(pid, process)
@@ -138,7 +138,7 @@ object ProcessDiscoveryWindows extends VolParse {
 
     /** Used to detect registry persistence. Contains Strings from the individual scans pg. 183*/
     val regPersistenceInfo: Vector[RegPersistenceInfo] = {
-      for(proc <- process) yield DetectRegPersistence.run(memFile, os, proc.pid, proc.offset, proc.hidden)
+      for(proc <- process) yield DetectRegPersistence.run(memFile, os, kdbg, proc.pid, proc.offset, proc.hidden)
     } // END regPersistenceInfo
     println("\n\nPrint registry persistence info: \n\n")
     regPersistenceInfo.foreach(println)
@@ -147,7 +147,7 @@ object ProcessDiscoveryWindows extends VolParse {
 
     /** Determine which pids have networking capability and look for promiscuous mode. */
     val (netPidMap, promiscMap): (Map[String, Boolean], Map[String, Boolean]) = {
-      examineNetActivity(memFile, os)
+      examineNetActivity(memFile, os, kdbg)
     }
 
     /********************************************
@@ -162,14 +162,13 @@ object ProcessDiscoveryWindows extends VolParse {
 
     /** Only gives privileges that a process specifically enabled. */
     val enabledPrivs: Vector[Privileges] = {
-      for (proc <- process) yield findEnabledPrivs(memFile, os, proc.pid, proc.offset, proc.hidden)
+      for (proc <- process) yield findEnabledPrivs(memFile, os, kdbg, proc.pid, proc.offset, proc.hidden)
     }
     enabledPrivs.foreach(println)
 
 
-
     /** Perform malfind scan*/
-    val malfind: Map[String, String] = malfindScan(memFile, os, process)
+    val malfind: Map[String, String] = malfindScan(memFile, os, kdbg, process)
 
     println("\n\nPrinting malfind results...\n\n")
     for((key, scan) <- malfind) println(key + "\n" + scan)
@@ -253,29 +252,38 @@ object ProcessDiscoveryWindows extends VolParse {
   } // END getParents()
 
   /** Scan with malfind for all processes. */
-  private[this] def malfindScan(memFile: String, os: String, process: Vector[ProcessBbs]): Map[String, String] = {
+  private[this] def malfindScan(memFile: String, os: String, kdbg: String, process: Vector[ProcessBbs]): Map[String, String] = {
     val resultVec: Vector[(String, String)] = {
-      for(proc <- process) yield malfindPerPid(memFile, os, proc.pid, proc.offset, proc.hidden)
+      for(proc <- process) yield malfindPerPid(memFile, os, kdbg, proc.pid, proc.offset, proc.hidden)
     }
     return resultVec.toMap
   } // END malfind()
 
   /** Scan with malfind for each individual process. */
-  private[this] def malfindPerPid(memFile: String, os: String, pid: String,
+  private[this] def malfindPerPid(memFile: String, os: String, kdbg: String, pid: String,
                                   offset: String, hid: Boolean): (String, String) = {
     var malScan = ""
+    if(kdbg.nonEmpty){
+      if (hid)
+        malScan = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset".!!.trim).getOrElse("")
+      else
+        malScan = Try( s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
+    } // END if kdbg.nonEmpty()
 
-    if (hid)
-      malScan = Try( s"python vol.py -f $memFile --profile=$os malfind --offset=$offset".!!.trim).getOrElse("")
-    else
-      malScan = Try( s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
+
 
     return (pid, malScan)
   } // END malfindPerPid()
 
   /** Determines which PIDs do networking and if promiscuous mode is on. */
-  private[this] def examineNetActivity(memFile: String, os: String): (Map[String, Boolean], Map[String, Boolean]) = {
-    val networkActivity = Try( s"python vol.py -f $memFile --profile=$os handles -t File").getOrElse("")
+  private[this] def examineNetActivity(memFile: String, os: String, kdbg: String): (Map[String, Boolean], Map[String, Boolean]) = {
+    var networkActivity = ""
+    if(kdbg.nonEmpty){
+      networkActivity = Try( s"python vol.py --conf-file=user_config.txt handles -t File").getOrElse("")
+    }else{
+      networkActivity = Try( s"python vol.py -f $memFile --profile=$os handles -t File").getOrElse("")
+    }
+    networkActivity = Try( s"python vol.py -f $memFile --profile=$os handles -t File").getOrElse("")
     val netActivityVec: Vector[String] = parseOutputNoHeader(networkActivity).getOrElse(Vector[String]())
     val netActivity = netCheck(netActivityVec)
     val promiscMode = promiscCheck(netActivityVec)
@@ -313,21 +321,32 @@ object ProcessDiscoveryWindows extends VolParse {
     * @param pid
     * @return Vector[String]
     */
-  private[this] def fileNameDiscrepancies(memFile: String, os: String, pid: String): Vector[String] = {
+  private[this] def fileNameDiscrepancies(memFile: String, os: String, kdbg: String, pid: String): Vector[String] = {
 
     println("\n\nSearching for filename discrepancies...\n\n")
 
-    /** Make sure the filenames in the details and the filenames for each process match (182) */
-    val fileNameDiscrepancies: String = {
-      Try( s"python vol.py -f $memFile --profile=$os -p $pid handles -t File, Mutant --silent".!!.trim )
-        .getOrElse("")
+    var fileNameDiscrep = ""
+    if(kdbg.nonEmpty){
+      fileNameDiscrep = {
+        Try( s"python vol.py -f $memFile --conf-file=user_config.txt -t File, Mutant --silent".!!.trim )
+          .getOrElse("")
+      }
+    }else{
+      fileNameDiscrep = {
+        Try( s"python vol.py -f $memFile --profile=$os -p $pid handles -t File, Mutant --silent".!!.trim )
+          .getOrElse("")
+      }
     }
+
+    /** Make sure the filenames in the details and the filenames for each process match (182) */
     val pattern = ".*(NamedPipe|Tcp|Ip).*".r
-    val parsedDiscrepancies = parseOutputDashVec(fileNameDiscrepancies)
+    val parsedDiscrepancies = parseOutputDashVec(fileNameDiscrep)
     val lookForDiscrepancies = {
       parsedDiscrepancies.getOrElse(Vector[String]())
         .map(x => pattern.findFirstIn(x).getOrElse("where's the line?") != "where's the line?")
     }
+    println("Printing filename discrepancies:\n\n")
+    lookForDiscrepancies.foreach(println)
 
     // Look for named "NamedPipe", "\Device\Tcp", and "\Device\Ip"
     // If there are occurrences, we should print full result.
@@ -336,9 +355,9 @@ object ProcessDiscoveryWindows extends VolParse {
     // NOTE: It might be useful to consider the size of the handle count.
 
     if(lookForDiscrepancies.nonEmpty){
-      return parsedDiscrepancies.getOrElse(Vector[String]())
+      parsedDiscrepancies.getOrElse(Vector[String]())
     }else {
-      return Vector[String]()
+      Vector[String]()
     } // END if/else
 
   } // END fileNameDiscrepancies()
@@ -352,7 +371,7 @@ object ProcessDiscoveryWindows extends VolParse {
     * @param pid
     * @return (ArrayBuffer of all privs enabled, ArrayBuffer of suspicious privs enabled)
     */
-  def findEnabledPrivs(memFile: String, os: String, pid: String, offset: String, hid: Boolean): Privileges ={
+  def findEnabledPrivs(memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean): Privileges ={
 
     // Need to research more privileges to add to this list.
 
@@ -365,10 +384,18 @@ object ProcessDiscoveryWindows extends VolParse {
     // There are a lot of other privileges that should probably be added to the list.
     var privsScan = ""
     /** Allows us to determine which privilege the process enabled (list on 171-172) */
-    if (hid)
-      privsScan = Try( s"python vol.py -f $memFile --profile=$os privs --offset=$offset".!!.trim ).getOrElse("")
-    else
-      privsScan =    Try( s"python vol.py -f $memFile --profile=$os privs -p $pid".!!.trim ).getOrElse("")
+    if(kdbg.nonEmpty){
+      if (hid)
+        privsScan = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset".!!.trim ).getOrElse("")
+      else
+        privsScan = Try( s"python vol.py --conf-file=user_config.txt privs -p $pid".!!.trim ).getOrElse("")
+    }else{
+      if (hid)
+        privsScan = Try( s"python vol.py -f $memFile --profile=$os privs --offset=$offset".!!.trim ).getOrElse("")
+      else
+        privsScan = Try( s"python vol.py -f $memFile --profile=$os privs -p $pid".!!.trim ).getOrElse("")
+    }
+
 
     /** Only gives privileges that a process specifically enabled by process. */
     val privs: Option[Vector[String]] = parseOutputDashVec( privsScan )
@@ -458,6 +485,7 @@ final case class YaraSuspicious(packers: Vector[YaraParse],
 object AutomateYara extends VolParse with SearchRange {
   private[windows] def run( os: String,
            memFile: String,
+                            kdbg: String,
            process: Vector[ProcessBbs],
            net: Vector[NetConnections],
            dllInfo: Vector[DllInfo] ): YaraBrain = {
@@ -465,13 +493,13 @@ object AutomateYara extends VolParse with SearchRange {
     val allDllInfo: Vector[Vector[DllHexInfo]] = for(dll <- dllInfo) yield dll.memRange
 
     println("\n\nScanning memory with yara...\n\n")
-
+    val netOutgoing: Vector[(String, String)] = net.filter( _.unknownDestIp ).map(x => (x.pid, x.srcIP))
+    val netIncoming = net.filter(_.unknownSrcIp).map(x => (x.pid, x.destIP))
+    val srcToPid = netIncoming ++: netIncoming
     // (pid, destination IP)
-    val netOutgoing: Vector[(String, String)] = net.filter( _.destLocal == false ).map(x => (x.pid, x.destIP))
-    val netIncoming = net.filter(_.destLocal).map(x => (x.pid, x.destIP))
 
     val pids: Vector[String] = process.map(x => x.pid)
-    val netPids = netOutgoing.map(_._1)
+    val netPids = srcToPid.map(_._1)
 
     /** Filter dllInfo so it only contains processes w/ outgoing connections. */
     val locateDll: Vector[Vector[DllHexInfo]] = for{
@@ -486,7 +514,7 @@ object AutomateYara extends VolParse with SearchRange {
 
     // (pid -> Pertinent yara info )
     val ipCheck: Vector[(String, Vector[YaraParse])] = {
-      runIp(memFile, os, netOutgoing, pids)
+      runIp(memFile, os, kdbg, netOutgoing, pids)
     } // END ipCheck
 
     /**
@@ -522,41 +550,41 @@ object AutomateYara extends VolParse with SearchRange {
     // searchHexRange.foreach(println)
 
     println("\n\nScanning for URLs with yara...\n\n")
-    val urls: Vector[YaraParseString] = findUrls(memFile, os)
+    val urls: Vector[YaraParseString] = findUrls(memFile, os, kdbg)
 
     println("\n\nScanning for packers with yara...\n\n")
-    val packers: Vector[YaraParse] = findPackers(memFile, os)
+    val packers: Vector[YaraParse] = findPackers(memFile, os, kdbg)
 
     println("\n\nScanning for anti-debug signatures with yara...\n\n")
-    val antidebug: Vector[YaraParse] = findAntiDebug(memFile, os)
+    val antidebug: Vector[YaraParse] = findAntiDebug(memFile, os, kdbg)
 
     println("\n\nScanning for exploit kits with yara...\n\n")
-    val exploitKits: Vector[YaraParse] = findExploitKits(memFile, os)
+    val exploitKits: Vector[YaraParse] = findExploitKits(memFile, os, kdbg)
 
     println("\n\nScanning for malicious documents with yara...\n\n")
-    val malDocs: Vector[YaraParse] = findMalDocs(memFile, os)
+    val malDocs: Vector[YaraParse] = findMalDocs(memFile, os, kdbg)
 
     println("\n\nScanning for webshells with yara...\n\n")
-    val webshells: Vector[YaraParse] = findWebshells(memFile, os)
+    val webshells: Vector[YaraParse] = findWebshells(memFile, os, kdbg)
 
     println("\n\nScanning for known CVEs with yara...\n\n")
-    val cveFound: Vector[YaraParse] = findCVE(memFile, os)
+    val cveFound: Vector[YaraParse] = findCVE(memFile, os, kdbg)
 
     println("\n\nScanning for IPs in processes with yara...\n\n")
-    val ipRule: Vector[YaraParseString] = findIpRule(memFile, os)
+    val ipRule: Vector[YaraParseString] = findIpRule(memFile, os, kdbg)
 
     println("\n\nScanning for suspicious strings with yara...\n\n")
-    val suspString: Vector[YaraParseString] = findSuspStrings(memFile, os)
+    val suspString: Vector[YaraParseString] = findSuspStrings(memFile, os, kdbg)
 
     /** Output too verbose to be useful. Would need to scan specific PID. */
     // val base64: Vector[YaraParseString]  = findBase64(memFile, os)
 
     println("\n\nScanning for malware with yara...\n\n")
     /** Malware Checks */
-    val mal1: Vector[YaraParseString] = checkForMal1(memFile, os)
-    val mal2: Vector[YaraParseString] = checkForMal2(memFile, os)
-    val mal3: Vector[YaraParseString]  = checkForMal3(memFile, os)
-    val mal4: Vector[YaraParseString]  = checkForMal4(memFile, os)
+    val mal1: Vector[YaraParseString] = checkForMal1(memFile, os, kdbg)
+    val mal2: Vector[YaraParseString] = checkForMal2(memFile, os, kdbg)
+    val mal3: Vector[YaraParseString]  = checkForMal3(memFile, os, kdbg)
+    val mal4: Vector[YaraParseString]  = checkForMal4(memFile, os, kdbg)
 
     /** Concat all malware scans together. */
     val concatMal: Vector[YaraParseString] = mal1 ++: mal2 ++: mal3 ++: mal4
@@ -572,18 +600,18 @@ object AutomateYara extends VolParse with SearchRange {
     }
 
     println("\n\nScanning for cryptography in process memory...\n\nThis may take a while...\n\n")
-    val crypto: Vector[YaraParse] = findCrypto(memFile, os)
+    val crypto: Vector[YaraParse] = findCrypto(memFile, os, kdbg)
 
     /** When this program is run main full program, this will be returned */
     return YaraBrain(urls, ipRule, concatMal, lowHitScans, crypto, searchHex)
   } // END run()
 
-  private[this] def runIp(memFile: String, os: String,  info: Vector[(String, String)], pids: Vector[String]) = {
+  private[this] def runIp(memFile: String, os: String,  kdbg: String, info: Vector[(String, String)], pids: Vector[String]) = {
 
     val uniqInfo = info.distinct
 
     val ipResult: Vector[(String, Vector[YaraParse])] = {
-      for(ip <- uniqInfo) yield findIps(memFile, os, ip._1, ip._2, pids)
+      for(ip <- uniqInfo) yield findIps(memFile, os, kdbg, ip._1, ip._2, pids)
     }
 
     ipResult
@@ -631,7 +659,7 @@ object AutomateYara extends VolParse with SearchRange {
     * This rule might be too expensive
     *************************************/
   /** Find IPs in processes */
-  private[this] def findIpRule(memFile: String, os: String): Vector[YaraParseString] = {
+  private[this] def findIpRule(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
     /*
     val ip = Try( s"python vol.py -f $memFile --profile=$os yarascan -y ip.yar".!!.trim )
       .getOrElse("Nothing found.")
@@ -642,43 +670,75 @@ object AutomateYara extends VolParse with SearchRange {
   } // END findIpRule
 
   /** Find suspicious string. */
-  private[this] def findSuspStrings(memFile: String, os: String): Vector[YaraParseString] = {
-    val suspStrings = Try( s"python vol.py -f $memFile --profile=$os yarascan -y suspicious_strings.yar".!!.trim )
-      .getOrElse("Nothing found.")
+  private[this] def findSuspStrings(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y suspicious_strings.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y suspicious_strings.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    parseYaraString(suspStrings)
+    parseYaraString(str)
   } // END findSuspStrings()
 
   /** Run scan to look for malware */
-  private[this] def checkForMal1(memFile: String, os: String): Vector[YaraParseString] = {
-    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule1.yar".!!.trim )
-      .getOrElse("Nothing found.")
+  private[this] def checkForMal1(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
 
-    parseYaraString(mal)
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule1.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule1.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
+
+    parseYaraString(str)
   } // END checkForMal1()
 
   /** Run scan to look for malware */
-  private[this] def checkForMal2(memFile: String, os: String): Vector[YaraParseString] = {
-    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule2.yar".!!.trim )
-      .getOrElse("Nothing found.")
+  private[this] def checkForMal2(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule2.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule2.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    parseYaraString(mal)
+    parseYaraString(str)
   } // END checkForMal1()
 
   /** Run scan to look for malware */
-  private[this] def checkForMal3(memFile: String, os: String): Vector[YaraParseString] = {
-    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
-      .getOrElse("Nothing found.")
+  private[this] def checkForMal3(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
 
-    parseYaraString(mal)
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule3.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
+
+    parseYaraString(str)
   } // END checkForMal1()
 
   /** Run scan to look for malware */
-  private[this] def checkForMal4(memFile: String, os: String): Vector[YaraParseString] = {
-    val mal = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
-      .getOrElse("Nothing found.")
+  private[this] def checkForMal4(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule3.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    parseYaraString(mal)
+    parseYaraString(str)
   } // END checkForMal1()
 
   /*
@@ -705,18 +765,24 @@ object AutomateYara extends VolParse with SearchRange {
     * PROBLEM WITH MISSING yara rules file!!
     **************************************/
   /** Find URLs in processes */
-  private[this] def findUrls(memFile: String, os: String): Vector[YaraParseString] = {
-    val urls = Try( s"python vol.py -f $memFile --profile=$os yarascan -y url.yar".!!.trim )
-      .getOrElse("Nothing found.")
+  private[this] def findUrls(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y url.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y url.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    return parseYaraString(urls)
+    return parseYaraString(str)
   } // END findUrls()
 
   /*************************************
     * This scan might be too expensive.
     ************************************/
   /** Find type of crypto used in processes */
-  private[this] def findCrypto(memFile: String, os: String): Vector[YaraParse] = {
+  private[this] def findCrypto(memFile: String, os: String, kdbg: String): Vector[YaraParse] = {
 /*
     val cryptoSigs = Try( s"python vol.py -f $memFile --profile=$os yarascan -y crypto_signatures.yar".!!.trim )
       .getOrElse("No crypto signatures found.")
@@ -728,83 +794,129 @@ object AutomateYara extends VolParse with SearchRange {
     return Vector(YaraParse("", "", "", ""))
   } // END findCrypto()
 
-  private[this] def findExploitKits(memFile: String, os: String): Vector[YaraParse] = {
-    val exploits = Try( s"python vol.py -f $memFile --profile=$os yarascan -y exploitkits_rule.yar".!!.trim )
-      .getOrElse("No exploit kits found.")
+  private[this] def findExploitKits(memFile: String, os: String, kdbg: String): Vector[YaraParse] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y exploitkits_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y exploitkits_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    val parseExploits = parseYaraResults(exploits, "Exploit Kit Signatures").sortBy(_.owner)
+
+    val parseExploits = parseYaraResults(str, "Exploit Kit Signatures").sortBy(_.owner)
 
     return parseExploits
   } // END findExploitKits()
 
   /** Will search for an IP address in process memory */
-  private[this] def findIps(memFile: String, os: String, pid: String, ip: String, pids: Vector[String]): (String, Vector[YaraParse]) = {
+  private[this] def findIps(memFile: String, os: String, kdbg: String, pid: String, ip: String, pids: Vector[String]): (String, Vector[YaraParse]) = {
     var yaraByIp = ""
 
     val ipNoPort = ip.splitLast(':')(0)
 
-    if (pids.contains(pid)){
-      println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
+    var str = ""
+    if(kdbg.nonEmpty){
+      if (pids.contains(pid)){
+        println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
 
-      yaraByIp = {
-        Try( s"python vol.py -f $memFile --profile=$os yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
-          .getOrElse(s"No results for $ipNoPort in $pid")
+        yaraByIp = {
+          Try( s"python vol.py --conf-file=user_conf.txt yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
+            .getOrElse(s"No results for $ipNoPort in $pid")
+        }
+      }
+    }else{
+      if (pids.contains(pid)){
+        println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
+
+        yaraByIp = {
+          Try( s"python vol.py -f $memFile --profile=$os yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
+            .getOrElse(s"No results for $ipNoPort in $pid")
+        }
       }
     }
-    val yaraParsed: Vector[YaraParse] = parseYaraResults(yaraByIp, "IP")
+
+    val yaraParsed: Vector[YaraParse] = parseYaraResults(str, "IP")
 
     return (pid, yaraParsed)
     // Need to parse the results
 
   } // END findIps()
 
-  private[this] def findMalDocs(memFile: String, os: String): Vector[YaraParse] = {
+  private[this] def findMalDocs(memFile: String, os: String, kdbg: String): Vector[YaraParse] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malicious_documents_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malicious_documents_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    val malDocs = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=malicious_documents_rule.yar".!!.trim )
-      .getOrElse("Nothing found.")
-
-    val malDocsParsed = parseYaraResults(malDocs, "Malicious Documents").sortBy(_.owner)
+    val malDocsParsed = parseYaraResults(str, "Malicious Documents").sortBy(_.owner)
 
     return malDocsParsed
   } // END findMalDocs()
 
-  private[this] def findWebshells(memFile: String, os: String): Vector[YaraParse] = {
+  private[this] def findWebshells(memFile: String, os: String, kdbg: String): Vector[YaraParse] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y webshell.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y webshell.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    val shells = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=webshell.yar".!!.trim )
-      .getOrElse("No possible webshells found.")
-
-    val shellsParsed = parseYaraResults(shells, "Webshells").sortBy(_.owner)
+    val shellsParsed = parseYaraResults(str, "Webshells").sortBy(_.owner)
 
     return shellsParsed
   } // END findWebshells()
 
-  private[this] def findCVE(memFile: String, os: String): Vector[YaraParse] ={
+  private[this] def findCVE(memFile: String, os: String, kdbg: String): Vector[YaraParse] ={
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y cve_rules.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y cve_rules.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    val cve = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=cve_rules.yar".!!.trim )
-      .getOrElse("No CVE Signatures Found")
-
-    val cveParsed = parseYaraResults(cve, "CVE").sortBy(_.owner)
+    val cveParsed = parseYaraResults(str, "CVE").sortBy(_.owner)
 
     return cveParsed
   } // END findCVE()
 
-  private[this] def findAntiDebug(memFile: String, os: String): Vector[YaraParse] = {
+  private[this] def findAntiDebug(memFile: String, os: String, kdbg: String):  Vector[YaraParse] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y antidebug_antivm.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y antidebug_antivm.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    val antiDebug = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=antidebug_antivm.yar".!!.trim )
-      .getOrElse("Could not find anti-debug Signatures")
-
-    val debugParsed = parseYaraResults(antiDebug, "Anti-Debug").sortBy(_.owner)
+    val debugParsed = parseYaraResults(str, "Anti-Debug").sortBy(_.owner)
 
     return debugParsed
   } // END findAntiDebug()
 
   /** Searched for packers used to obfuscate code. */
-  private[this] def findPackers(memFile: String, os: String): Vector[YaraParse] = {
+  private[this] def findPackers(memFile: String, os: String, kdbg: String):  Vector[YaraParse] = {
+    var str = ""
+    if(kdbg.nonEmpty){
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y packers_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y packers_rule.yar".!!.trim )
+        .getOrElse("Nothing found.")
+    }
 
-    val packers = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=packers_rule.yar".!!.trim )
-      .getOrElse("Could not find packers")
 
-    val packersParsed = parseYaraResults(packers, "Packers").sortBy(_.owner)
+    val packersParsed = parseYaraResults(str, "Packers").sortBy(_.owner)
 
     return packersParsed
   } // END findPackers()
@@ -939,10 +1051,10 @@ object DetectRegPersistence extends VolParse {
     * THIS SHOULD ACCEPT A VECTOR[PID] SO WE DON'T HAVE TO CREATE SO MANY OBJECTS!!!!
     **********************************************************************************
     **********************************************************************************/
-  def run( mem: String, os: String, pid: String, offset: String, hid: Boolean ): RegPersistenceInfo = {
-    val persistHandles: RegistryHandles = regPersistence( mem, os, pid, offset, hid )
+  def run( mem: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean ): RegPersistenceInfo = {
+    val persistHandles: RegistryHandles = regPersistence( mem, os, kdbg, pid, offset, hid )
     val testResult: ArrayBuffer[String] = regCountTest( persistHandles.map )
-    val interrogation = interrogateReg(mem, os, testResult, persistHandles)
+    val interrogation = interrogateReg(mem, os, kdbg, testResult, persistHandles)
 
     return interrogation
   } // END run()
@@ -956,18 +1068,30 @@ object DetectRegPersistence extends VolParse {
     *         occurrences in a Map[String, Int], the FQDN to the RUN key for this system,
     *         and the count of the times run occurs.
     */
-  def regPersistence( memFile: String, os: String, pid: String, offset: String, hid: Boolean ): RegistryHandles = {
+  def regPersistence( memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean ): RegistryHandles = {
     var detectRegPersistence = ""
-    if (hid) {
-      detectRegPersistence = {
-        Try(s"python vol.py -f $memFile --profile=$os handles --object-type=Key --offset=$offset".!!.trim).getOrElse("")
+    if(kdbg.nonEmpty){
+      if (hid) {
+        detectRegPersistence = {
+          Try(s"python vol.py --conf-file=user_conf.txt --offset=$offset".!!.trim).getOrElse("")
+        }
+      }else{
+        detectRegPersistence = {
+          Try( s"python vol.py --conf-file=user_conf.txt handles --object-type=Key --pid=$pid".!!.trim ).getOrElse("")
+        }
       }
-    }else{
-      detectRegPersistence = {
-        Try( s"python vol.py -f $memFile --profile=$os handles --object-type=Key --pid=$pid".!!.trim ).getOrElse("")
+    }
+    else {
+      if (hid) {
+        detectRegPersistence = {
+          Try(s"python vol.py -f $memFile --profile=$os handles --object-type=Key --offset=$offset".!!.trim).getOrElse("")
+        }
+      } else {
+        detectRegPersistence = {
+          Try(s"python vol.py -f $memFile --profile=$os handles --object-type=Key --pid=$pid".!!.trim).getOrElse("")
+        }
       }
-    } // END if/else
-
+    }
 
     /** We need to look through registry key names and find ones w/ numerous open handles to the same key */
     val regPersistVec: Vector[String] = {
@@ -1011,6 +1135,7 @@ object DetectRegPersistence extends VolParse {
 
   def interrogateReg( memFile: String,
                       os: String,
+                      kdbg: String,
                       arr: ArrayBuffer[String],
                       handles: RegistryHandles): RegPersistenceInfo = {
 
@@ -1020,7 +1145,13 @@ object DetectRegPersistence extends VolParse {
     val scanMap: mutable.Map[String, Option[String]] = mutable.Map[String, Option[String]]()
 
     for(key <- arr) {
-      scanMap += (key -> Some( s"python vol.py -f $memFile --profile=$os printkey -K $key".!!.trim ))
+      scanMap += {
+        if(kdbg.nonEmpty){
+          (key -> Some( s"python --conf-file=user_conf.txt printkey -K $key".!!.trim ))
+        }else{
+          (key -> Some( s"python vol.py -f $memFile --profile=$os printkey -K $key".!!.trim ))
+        }
+      }
       regMap += (key -> map(key))
     }
 
@@ -1117,7 +1248,7 @@ final case class LdrInfo( pid: String,
                           baseLoc: Vector[String],   // base location of DLL.
                           probs: Vector[String],     // Finds lines that indicate there's an unlinked DLL.
                           dllName: Vector[String],
-                          pathDiscrepancies: Boolean = false){  // Vector of problem DLL names
+                          meterpreter: Boolean = false){  // Vector of problem DLL names
   override def toString: String = {
 
     val cleanProb = for{
@@ -1141,15 +1272,15 @@ final case class DllInfo(pid: String, memRange: Vector[DllHexInfo], command: Str
   ***************************************************/
 object DllScan extends VolParse {
 
-  def run(os: String, memFile: String, pidVec: Vector[ProcessBbs]): (Vector[DllInfo], Vector[LdrInfo]) ={
+  def run(os: String, memFile: String, kdbg: String, pidVec: Vector[ProcessBbs]): (Vector[DllInfo], Vector[LdrInfo]) ={
     /** ldrMemLoc contains memory locations we'll pass to dlldump & ldrFullScan contains filtered scan */
     val ldrInfo : Vector[LdrInfo] =
       for{procBbs<- pidVec
-      } yield ldrScan(memFile, os, procBbs.pid, procBbs.offset, procBbs.hidden)
+      } yield ldrScan(memFile, os, kdbg, procBbs.pid, procBbs.offset, procBbs.hidden)
 
     val dllInfo: Vector[DllInfo] = for{
       procBbs<- pidVec
-    } yield dllListScan(memFile, os, procBbs.pid, procBbs.offset, procBbs.hidden)
+    } yield dllListScan(memFile, os, kdbg, procBbs.pid, procBbs.offset, procBbs.hidden)
 
     return (dllInfo, ldrInfo)
   } // END run()
@@ -1161,7 +1292,7 @@ object DllScan extends VolParse {
     * @param os
     * @param pid
     */
-  private[this] def ldrScan(memFile: String, os: String, pid: String, offset: String, hid: Boolean): LdrInfo = {
+  private[this] def ldrScan(memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean): LdrInfo = {
     /** We want to find each process that has a False value in it.
       * We also want to look for executables w/ no Mapped Path */
 
@@ -1171,10 +1302,18 @@ object DllScan extends VolParse {
     val noMappedPath = ".*\\.\\.".r
 
     var ldr = ""
-    if(hid)
-      ldr = Try( s"python vol.py -f $memFile --profile=$os ldrmodules --offset=$offset -v".!!.trim ).getOrElse("")
-    else
-      ldr = Try( s"python vol.py -f $memFile --profile=$os ldrmodules -p $pid -v".!!.trim ).getOrElse("")
+    if(kdbg.nonEmpty){
+      if(hid)
+        ldr = Try( s"python vol.py --conf-file=user_conf.txt --offset=$offset -v".!!.trim ).getOrElse("")
+      else
+        ldr = Try( s"python vol.py --conf-file=user_conf.txt ldrmodules -p $pid -v".!!.trim ).getOrElse("")
+    }
+    else {
+      if (hid)
+        ldr = Try(s"python vol.py -f $memFile --profile=$os ldrmodules --offset=$offset -v".!!.trim).getOrElse("")
+      else
+        ldr = Try(s"python vol.py -f $memFile --profile=$os ldrmodules -p $pid -v".!!.trim).getOrElse("")
+    } // END if/else kdbg.nonEmpty
 
     val ldrParsed: Vector[String] = parseOutputNoTrim(ldr).getOrElse(Vector[String]())
 
@@ -1228,20 +1367,28 @@ object DllScan extends VolParse {
   } // ldrScan()
 
   /** Returns PID, Vector with Memory Location range of DLL, and Command Line Information) */
-  private[this] def dllListScan(memFile: String, os: String, pid: String, offset: String, hid: Boolean): DllInfo = {
+  private[this] def dllListScan(memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean): DllInfo = {
 
     var dllList = ""
-    if (hid)
-      dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist --offset=$offset".!!.trim ).getOrElse("")
-    else
-      dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist -p $pid".!!.trim ).getOrElse("")
+    if(kdbg.nonEmpty){
+      if (hid)
+        dllList = Try( s"python vol.py --conf-file=user_conf.txt dlllist --offset=$offset".!!.trim ).getOrElse("")
+      else
+        dllList = Try( s"python vol.py --conf-file=user_conf.txt dlllist -p $pid".!!.trim ).getOrElse("")
+    }else{
+      if (hid)
+        dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist --offset=$offset".!!.trim ).getOrElse("")
+      else
+        dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist -p $pid".!!.trim ).getOrElse("")
+    } // END if/else kdbg.nonEmpty
+
 
     val parseAsterisks: Vector[String] = parseOutputAsterisks(dllList).getOrElse(Vector[String]())
 
     val commandLine = parseAsterisks.filter(_.contains("Command"))
     val filterDLL: Vector[String] = parseOutputDashVec(dllList).getOrElse(Vector[String]())
 
-    val grabDllInfo: Vector[DllHexInfo] = locateDll(memFile, os, pid, offset, hid)
+    val grabDllInfo: Vector[DllHexInfo] = locateDll(memFile, os, kdbg, pid, offset, hid)
 
     /** Filter out DLLs loaded because specified by IAT (not explicitly loaded) */
     val dllWithRemoveIAT = filterDLL.filterNot(_.contains("0xffff"))
@@ -1256,13 +1403,22 @@ object DllScan extends VolParse {
   } // END dllListScan()
 
   /** Find DLL memory location ranges.  */
-  private[this] def locateDll(memFile: String, os: String,
+  private[this] def locateDll(memFile: String, os: String, kdbg: String,
                               pid: String, offset: String, hid: Boolean): Vector[DllHexInfo] = {
     var dllList = ""
-    if (hid)
-      dllList = Try( s"python vol.py -f $memFile --profile=$os --offset=$offset dlllist".!!.trim ).getOrElse("")
-    else
-      dllList = Try( s"python vol.py -f $memFile --profile=$os -p $pid dlllist".!!.trim ).getOrElse("")
+    if(kdbg.nonEmpty){
+      if (hid)
+        dllList = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset dlllist".!!.trim ).getOrElse("")
+      else
+        dllList = Try( s"python vol.py --conf-file=user_config.txt -p $pid dlllist".!!.trim ).getOrElse("")
+    }
+    else{
+      if (hid)
+        dllList = Try( s"python vol.py -f $memFile --profile=$os --offset=$offset dlllist".!!.trim ).getOrElse("")
+      else
+        dllList = Try( s"python vol.py -f $memFile --profile=$os -p $pid dlllist".!!.trim ).getOrElse("")
+    }
+
 
     val parsed: Option[Vector[String]] = parseOutputDashVec(dllList)
 
