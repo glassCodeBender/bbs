@@ -258,8 +258,8 @@ object VolDiscoveryWindows extends VolParse {
     var run = ""
 
     if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key1".!!.trim ).getOrElse("")
-      run =Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key2".!!.trim ).getOrElse("")
+      runOnce = Try(s"python --conf-file=user_config.txt printkey -g $kdbg -K $key1".!!.trim ).getOrElse("")
+      run =Try(s"python vol.py --conf-file=user_config.txt printkey -g $kdbg -K $key2".!!.trim ).getOrElse("")
     } else{
       runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
       run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
@@ -275,11 +275,12 @@ object VolDiscoveryWindows extends VolParse {
     val dir = new File(mftDir)
     dir.mkdir()
 
-    val csvFileName = "mft_bbs" + Calendar.HOUR + "-" + Calendar.MINUTE + ".csv"
-    val mftFileName: String = "mft_bbs" + Calendar.HOUR + "-" + Calendar.MINUTE + ".body"
+    // val csvFileName = memFile + Calendar.HOUR + "-" + Calendar.MINUTE + ".csv"
+    val mftFileName: String = memFile + Calendar.HOUR + "-" + Calendar.MINUTE + ".body"
     // Outputting MFT as body file so it's easily parsed w/ sleuthkit
+
     if(kdbg.nonEmpty) {
-      Try(s"python vol.py -f $memFile --profile=$os -g $kdbg mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".!)
+      Try(s"python vol.py --conf-file=user_config.txt mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".!)
         .getOrElse(println("Failed to extract mft body file.\n"))
     }else{
       Try(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
@@ -321,7 +322,7 @@ object VolDiscoveryWindows extends VolParse {
 
     var shimcache = ""
     if(kdbg.nonEmpty){
-      shimcache = Try( s"python vol.py -f $memFile --profile=$os -g $kdbg shimcache".!!.trim ).getOrElse("")
+      shimcache = Try( s"python vol.py --conf-file=user_config.txt shimcache".!!.trim ).getOrElse("")
     }else {
       shimcache = Try(s"python vol.py -f $memFile --profile=$os shimcache".!!.trim).getOrElse("")
     }
@@ -366,11 +367,11 @@ object VolDiscoveryWindows extends VolParse {
     var service = ""
 
     if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key4".!!.trim ).getOrElse("")
+      runOnce = Try(s"python vol.py --conf-file=user_config.txt -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py --conf-file=user_config.txt -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py --conf-file=user_config.txt $kdbg -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py --conf-file=user_config.txt -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py --conf-file=user_config.txt -K $key4".!!.trim ).getOrElse("")
     } else{
       runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
       explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
@@ -403,11 +404,11 @@ object VolDiscoveryWindows extends VolParse {
 
     /** The variable names here are wrong, but I don't want to deal w/ it. */
     if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key4".!!.trim ).getOrElse("")
+      runOnce = Try(s"python vol.py --conf-file=user_config.txt -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py --conf-file=user_config.txt -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py --conf-file=user_config.txt -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py --conf-file=user_config.txt -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py --conf-file=user_config.txt -K $key4".!!.trim ).getOrElse("")
     } else{
       runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
       explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
@@ -937,52 +938,85 @@ object NetScan extends VolParse with SearchRange {
 
   private[this] def netScan(net: String): (Vector[NetConnections], Vector[String]) = {
 
-    val netParsed: Vector[String] = parseOutputDashVec(net).getOrElse(Vector[String]())
+    val netParsed: Vector[String] = Source.fromString(net)
+      .getLines
+      .dropWhile(!_.contains("Offset"))
+      .dropWhile(_.contains("Offset"))
+      .toVector
+    
     val net2d: Vector[Vector[String]] = vecParse(netParsed).getOrElse(Vector[Vector[String]]())
+
+    println("Printing net2d")
+    for{
+      line <- net2d
+      value <- line
+    } println(value)
 
     val includesListening = for{
       value <- net2d
       if value(4) != "LISTENING" || value(4) != "CLOSED" || value(4) != "ESTABLISHED"
-    } yield Vector(value(0), value(1), value(2), value(3), "NOINFO", value(4), value(5),
+    } yield Vector(value(0).trim, value(1).trim, value(2).trim, value(3).trim, "NOINFO", value(4).trim, value(5).trim,
       Try(value(6)).getOrElse("") + " " + Try(value(7)).getOrElse("") + " " + Try(value(8)).getOrElse(""))
 
     val discludesListening = for{
       value <- net2d
       if value(4) == "LISTENING" || value(4) == "CLOSED" || value(4) == "ESTABLISHED"
-    } yield Vector(value(0), value(1), value(2), value(3), value(4), value(5), value(6),
+    } yield Vector(value(0).trim, value(1).trim, value(2).trim, value(3).trim, value(4).trim, value(5).trim, value(6).trim,
       Try(value(7)).getOrElse("") + " " + Try(value(8)).getOrElse("") + " " + Try(value(9)).getOrElse(""))
 
     val allListening = includesListening ++: discludesListening
 
+    println("Print allListening\n")
+    for{
+      line <- allListening
+      value <- line
+    } print(value)
 
     val connects = for {
-      line <- net2d
-      if !line(2).startsWith("198") || !line(2).startsWith("10\\.") || !line(2).startsWith("172\\.")
+      line <- allListening
+      if {!line(2).startsWith("198") || !line(2).startsWith("10\\.") || !line(2).startsWith("172") &
+        line(3).startsWith("198") || line(3).startsWith("10\\.") || line(3).startsWith("172")}
     } yield new NetConnections(line(5), line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, false )
     // parse
     val connects2 = for {
-      line <- net2d
-      if !line(3).startsWith("198") || !line(3).startsWith("10\\.") || !line(3).startsWith("172\\.")
+      line <- allListening
+      if {line(2).startsWith("198") || line(2).startsWith("10\\.") || line(2).startsWith("172\\.") &
+        !line(3).startsWith("198") || !line(3).startsWith("10\\.") || !line(3).startsWith("172\\.")}
     } yield new NetConnections(line(5), line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", false, true )
     // parse
 
+    val connects3 = for{
+      line <- allListening
+      if {line(3).startsWith("198") || line(3).startsWith("10\\.") || line(3).startsWith("172\\.") &
+        line(2).startsWith("198") || line(2).startsWith("10\\.") || line(2).startsWith("172\\.")}
+    } yield new NetConnections(line(5), line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, true )
 
     val foreignSrc = connects.map(x => x.srcIP)
       .filterNot(_.startsWith("10\\."))
       .filterNot(_.startsWith("192"))
       .filterNot(_.startsWith("172"))
       .filterNot(_.contains("0\\.0\\.0\\.0"))
+      .filterNot(_ == "\\*:\\*")
     val foreignDest = connects.map(x => x.destIP)
       .filterNot(_.startsWith("10\\."))
       .filterNot(_.startsWith("192"))
       .filterNot(_.startsWith("172"))
       .filterNot(_.contains("0\\.0\\.0\\.0"))
+      .filterNot(_ == "\\*:\\*")
 
+
+    val allConnects = connects ++: connects2 ++: connects3
+
+    println("Printing Netscan parsed")
+    allConnects.foreach(println)
     val foreignIPs = foreignSrc ++: foreignDest
 
-    (connects, foreignIPs)
+    (allConnects, foreignIPs)
 } // END netScan()
 
+  /***************************************
+    * NEED TO FIX LIKE NETSCAN WAS FIXED
+    **************************************/
   /** Scan finds both open and closed network connections */
   private[this] def connScan(conn: String): (Vector[NetConnections], Vector[String]) = {
 
@@ -1827,6 +1861,7 @@ object RemoteMappedDriveSearch extends VolParse {
       symParsed.getOrElse(Vector[String]()).map(x => symLinkPattern.findFirstIn(x))
     }
     val map = mutable.Map[String, String]()
+
 
     var i = 0
     while(i < timeResult.length){
