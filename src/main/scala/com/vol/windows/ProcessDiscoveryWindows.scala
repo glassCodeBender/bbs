@@ -48,7 +48,7 @@ final case class YaraParse( classification: String, // What list did rule come f
                             owner: String,          // Which PID and process was matched?
                             offset: String ) {      // Where in memory was the match found?
   override def toString( ): String = {
-    "\nClassification: " + classification + "\nRule: " + rule + "\n" + owner + "\nOffset: " + offset + "\n"
+    "\n\nRule: " + rule + "\n" + owner + "\nOffset: " + offset + "\n"
   } // END toString()
 
 } // END case class YaraParse
@@ -67,7 +67,7 @@ final case class DllHexInfo(pid: String, dllName: String, lowHex: Long, highHex:
 
 /** Case class used if we want to include data found in String column of yarascan. */
 final case class YaraParseString(rule: String, proc: String, str: String) {
-  override def toString = "\nRule: " + rule + "\n" + proc + "\nData Found:" + str + "\n"
+  override def toString =  str + "\n"
 } // END case class YaraParseString
 
 /** Stores information we find out about the privileges each PID has. */
@@ -149,7 +149,7 @@ object ProcessDiscoveryWindows extends VolParse {
     }
 
     /********************************************
-      * THIS IS CAUSING PROBLEMS WITH OLDER OSs
+      * THIS IS CAUSING PROBLEMS WITH ALL OSs
       *******************************************/
     println("\n\nPrinting information about pid's networking capability...\n\n")
     for((key, bool) <- netPidMap) println(key + " -> " + bool )
@@ -164,6 +164,7 @@ object ProcessDiscoveryWindows extends VolParse {
     }
     enabledPrivs.foreach(println)
 
+    println("Scanning memory with malfind...")
     /** Perform malfind scan*/
     val malfind: Map[String, String] = malfindScan(memFile, os, kdbg, process)
 
@@ -198,40 +199,42 @@ object ProcessDiscoveryWindows extends VolParse {
    **********************************************************************/
 
   private[this] def getParents(pid: String, pids: Vector[ProcessBbs]): (String, Vector[(String, String)]) = {
+
     /** Returns the ppid of pid as the first value in Vector */
     val directParent = for {
       pidVal <- pids
       if pidVal.pid == pid
     } yield (pidVal.ppid, pidVal.name)
+
     val parentParent = for{
       pidVal <- pids
       if directParent.nonEmpty
-      if pidVal.pid == directParent(0)._1
+      if pidVal.pid == Try(directParent(0)._1).getOrElse("blah")
     } yield (pidVal.ppid, pidVal.name)
     val parent3 = for{
       pidVal <- pids
       if parentParent.nonEmpty
-      if pidVal.pid == parentParent(0)._1
+      if pidVal.pid == Try(parentParent(0)._1).getOrElse("blah")
     } yield (pidVal.ppid, pidVal.name)
     val parent4 = for{
       pidVal <- pids
       if parent3.nonEmpty
-      if pidVal.pid == parent3(0)._1
+      if pidVal.pid == Try(parent3(0)._1).getOrElse("blah")
     } yield (pidVal.ppid, pidVal.name)
     val parent5 = for{
       pidVal <- pids
       if parent4.nonEmpty
-      if pidVal.pid == parent4(0)._1
+      if pidVal.pid == Try(parent4(0)._1).getOrElse("blah")
     } yield (pidVal.ppid, pidVal.name)
     val parent6 = for{
       pidVal <- pids
       if parent5.nonEmpty
-      if pidVal.pid == parent5(0)._1
+      if pidVal.pid == Try(parent5(0)._1).getOrElse("Blah")
     } yield (pidVal.ppid, pidVal.name)
     val parent7 = for{
       pidVal <- pids
       if parent5.nonEmpty
-      if pidVal.pid == parent6(0)._1
+      if pidVal.pid == Try(parent6(0)._1).getOrElse("blah")
     } yield (pidVal.ppid, pidVal.name)
 
     var buff = ArrayBuffer[(String, String)]()
@@ -248,6 +251,11 @@ object ProcessDiscoveryWindows extends VolParse {
     return (pid, buff.toVector)
   } // END getParents()
 
+  /***************************************************************
+    **************************************************************
+    *********** THIS NEEDS TO ALL BE DONE AT ONCE!!! *************
+    **************************************************************
+    ***************************************************************/
   /** Scan with malfind for all processes. */
   private[this] def malfindScan(memFile: String, os: String, kdbg: String, process: Vector[ProcessBbs]): Map[String, String] = {
     val resultVec: Vector[(String, String)] = {
@@ -261,13 +269,10 @@ object ProcessDiscoveryWindows extends VolParse {
                                   offset: String, hid: Boolean): (String, String) = {
     var malScan = ""
     if(kdbg.nonEmpty){
-      if (hid)
-        malScan = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset".!!.trim).getOrElse("")
+        malScan = Try( s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
       else
         malScan = Try( s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
     } // END if kdbg.nonEmpty()
-
-
 
     return (pid, malScan)
   } // END malfindPerPid()
@@ -382,17 +387,11 @@ object ProcessDiscoveryWindows extends VolParse {
     var privsScan = ""
     /** Allows us to determine which privilege the process enabled (list on 171-172) */
     if(kdbg.nonEmpty){
-      if (hid)
-        privsScan = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset".!!.trim ).getOrElse("")
-      else
         privsScan = Try( s"python vol.py --conf-file=user_config.txt privs -p $pid".!!.trim ).getOrElse("")
-    }else{
-      if (hid)
-        privsScan = Try( s"python vol.py -f $memFile --profile=$os privs --offset=$offset".!!.trim ).getOrElse("")
-      else
+    }
+    else{
         privsScan = Try( s"python vol.py -f $memFile --profile=$os privs -p $pid".!!.trim ).getOrElse("")
     }
-
 
     /** Only gives privileges that a process specifically enabled by process. */
     val privs: Option[Vector[String]] = parseOutputDashVec( privsScan )
@@ -596,7 +595,7 @@ object AutomateYara extends VolParse with SearchRange {
       YaraSuspicious(packers, antidebug, exploitKits, webshells, cveFound, malDocs, suspString)
     }
 
-    println("\n\nScanning for cryptography in process memory...\n\nThis may take a while...\n\n")
+    // println("\n\nScanning for cryptography in process memory...\n\nThis may take a while...\n\n")
     val crypto: Vector[YaraParse] = findCrypto(memFile, os, kdbg)
 
     /** When this program is run main full program, this will be returned */
@@ -963,7 +962,7 @@ object AutomateYara extends VolParse with SearchRange {
       line(7).split("\\s+").last + line(8).split("\\s+").last + line(9).split("\\s+").last +
       line(10).split("\\s+").last + line(11).split("\\s+").last + line(12).split("\\s+").last +
       line(13).split("\\s+").last + line(14).split("\\s+").last + line(15).split("\\s+").last +
-      line(16).split("\\s+").last }.splitProtect("""\.\.\.\.""")(0))
+      line(16).split("\\s+").last }.splitProtect("""\.\.\.\.\.""")(0))
 
     /** Replace all occurrences of ".." or "..." with a single period. */
     val replaceExtraPeriods = replaceTwoOrThree(url)
@@ -1012,33 +1011,39 @@ object AutomateYara extends VolParse with SearchRange {
   * that is not helpful. We are more concerned with the Run key than the other keys.
   */
 /** (Key -> count),(Key -> Scan Results) */
-case class RegPersistenceInfo(persistenceMap: mutable.Map[String, Int],
+case class RegPersistenceInfo(pid: String,
+                               persistenceMap: mutable.Map[String, Int],
                               scanMap: mutable.Map[String, Option[String]],
                               handles: RegistryHandles){
   override def toString( ): String = {
 
-    var persistenceMapInfo = s"The ${handles.runKey} occurs ${handles.runCount} times.\n\nIf there are a lot of links" +
-      s"to the Run key from this process, it is likely that an attacker established persistence to pid: ${handles.pid}"
-    var scans = ""
-    for ((key, value) <- scanMap){
-      val occurrences = scanMap(key).getOrElse(0)
-      persistenceMapInfo = persistenceMapInfo + s"\n$key occurred $occurrences times."
-      scans = s"\n" + scans + s"$key\n" + value.getOrElse("THERE WERE NO SCAN RESULTS FOR THIS VALUE")
+    var str = ""
+    if(handles.runKey.nonEmpty){
+      var persistenceMapInfo = s"The ${handles.runKey} occurs ${handles.runCount} times.\n\nIf there are a lot of links" +
+        s" to the Run key from this process, it is likely that an attacker established persistence to pid: ${handles.pid}"
+      var scans = ""
+      for ((key, value) <- scanMap){
+        val occurrences = scanMap(key).getOrElse(0)
+        persistenceMapInfo = persistenceMapInfo + s"\n$key occurred $occurrences times."
+        scans = s"\n" + scans + s"$key\n" + value.getOrElse("THERE WERE NO SCAN RESULTS FOR THIS VALUE")
+      }
+      if (scanMap.nonEmpty){
+        str = s"\nThere were multiple indications that an attacker might have established registry Persistence: " +
+          persistenceMapInfo + scans
+      } else {
+        str = "There is no indication that an attacker set up links to the registry to maintain persistence.\n" +
+          persistenceMapInfo
+      } // END if/else
     }
-    if (scanMap.nonEmpty){
-      s"%nThere were multiple indications that an attacker might have established registry Persistence: " +
-        persistenceMapInfo + scans
-    } else {
-      "There is no indication that an attacker set up links to the registry to maintain persistence.\n" +
-        persistenceMapInfo
-    } // END if/else
+
+    return str
   } // END toString()
 
 } // END case class RegPersistenceInfo
 
 case class RegistryHandles(pid: String,                   // pid
                            map: mutable.Map[String, Int], // map of process to count
-                           runKey: Vector[String],        // Information in run key
+                           runKey: String,        // Information in run key
                            runCount: Int)                 // Number of times run occurred.
 
 object DetectRegPersistence extends VolParse {
@@ -1066,26 +1071,17 @@ object DetectRegPersistence extends VolParse {
     */
   def regPersistence( memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean ): RegistryHandles = {
     var detectRegPersistence = ""
+
+
+    /*** DOES NOT WORK FOR HIDDEN PROCESSES */
     if(kdbg.nonEmpty){
-      if (hid) {
-        detectRegPersistence = {
-          Try(s"python vol.py --conf-file=user_config.txt --offset=$offset".!!.trim).getOrElse("")
-        }
-      }else{
         detectRegPersistence = {
           Try( s"python vol.py --conf-file=user_config.txt handles --object-type=Key --pid=$pid".!!.trim ).getOrElse("")
         }
       }
-    }
     else {
-      if (hid) {
-        detectRegPersistence = {
-          Try(s"python vol.py -f $memFile --profile=$os handles --object-type=Key --offset=$offset".!!.trim).getOrElse("")
-        }
-      } else {
         detectRegPersistence = {
           Try(s"python vol.py -f $memFile --profile=$os handles --object-type=Key --pid=$pid".!!.trim).getOrElse("")
-        }
       }
     }
 
@@ -1093,8 +1089,8 @@ object DetectRegPersistence extends VolParse {
     val regPersistVec: Vector[String] = {
       parseOutputDashVec( detectRegPersistence )
     }.getOrElse( Vector[String]() )
-    val runKeys: Option[Vector[String]] = Some(regPersistVec.filter(_.endsWith("RUN")))
-    val runCount = runKeys.getOrElse(Vector[String]()).length
+    val runKeys: Vector[String] = regPersistVec.filter(_.endsWith("RUN"))
+    val runCount = runKeys.length
 
     /** Contains a Vector of each value with a duplicate */
     val dupKeys = regPersistVec.diff( regPersistVec.distinct ).distinct
@@ -1116,7 +1112,12 @@ object DetectRegPersistence extends VolParse {
       i += 1
     } // END while
 
-    return RegistryHandles(pid, mapToCount, runKeys.getOrElse(Vector("", "")), runCount)
+    val runKeyReg = "\\w+.+RUN".r
+    val actualRunKeys = runKeys.map(x => runKeyReg.findFirstIn(x))
+
+    val foundRunKeys = actualRunKeys.flatten.mkString("\n")
+
+    return RegistryHandles(pid, mapToCount, foundRunKeys, runCount)
   } // END regPersistence()
 
   /** Returns an Array of each key that occurred 3 or more times  */
@@ -1140,6 +1141,7 @@ object DetectRegPersistence extends VolParse {
     val regMap: mutable.Map[String, Int] = mutable.Map[String, Int]()
     val scanMap: mutable.Map[String, Option[String]] = mutable.Map[String, Option[String]]()
 
+    var pid = ""
     for(key <- arr) {
       scanMap += {
         if(kdbg.nonEmpty){
@@ -1148,10 +1150,11 @@ object DetectRegPersistence extends VolParse {
           (key -> Some( s"python vol.py -f $memFile --profile=$os printkey -K $key".!!.trim ))
         }
       }
+      pid = key
       regMap += (key -> map(key))
     }
 
-    return RegPersistenceInfo(regMap, scanMap, handles )
+    return RegPersistenceInfo(pid, regMap, scanMap, handles )
   } // END interrogateReg()
 } // END RegPersistence object
 
@@ -1393,7 +1396,7 @@ object DllScan extends VolParse {
     /** RETURN Statement
       * We want to know pid, memory range, and commandline stuff. */
     if(commandLine.nonEmpty) DllInfo(pid, grabDllInfo, commandLine(0))
-    else DllInfo(pid, grabDllInfo, "No Command Line Info")
+    else DllInfo(pid, grabDllInfo, "")
   } // END dllListScan()
 
   /** Find DLL memory location ranges.  */
