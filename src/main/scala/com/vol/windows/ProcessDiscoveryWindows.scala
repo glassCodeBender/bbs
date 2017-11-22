@@ -78,7 +78,7 @@ case class Privileges( pid: String,
   override def toString: String = {
     "PID: " + pid + "\nDebug Enabled: " + debugPriv + "\nEnabled: " + enabledPrivs.mkString + "\nSuspicious: " + suspiciousPrivs.mkString
   }
-}
+} // END Privileges class
 
 /**
   * IDEA: CLASSIFY each process after examination.
@@ -98,13 +98,11 @@ object ProcessDiscoveryWindows extends VolParse {
     ***************************************************
     ***************************************************/
 
-  private[windows] def run(os: String, memFile: String, kdbg: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
+  private[windows] def run(memFile: String, os: String, kdbg: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
 
     /**
       * LOGIC NEEDS TO BE DIFFERENT NOW THAT WE'RE LOOKING AT OFFSETS.
       */
-    /** A vector made up of all the pids */
-    val pidVec: Vector[String] = process.map(x => x.pid).distinct
 
     /** Need to reorganize the data */
     val (dllInfo, ldrInfo): (Vector[DllInfo], Vector[LdrInfo]) = DllScan.run(os, memFile, kdbg, process)
@@ -165,7 +163,6 @@ object ProcessDiscoveryWindows extends VolParse {
       for (proc <- process) yield findEnabledPrivs(memFile, os, kdbg, proc.pid, proc.offset, proc.hidden)
     }
     enabledPrivs.foreach(println)
-
 
     /** Perform malfind scan*/
     val malfind: Map[String, String] = malfindScan(memFile, os, kdbg, process)
@@ -822,7 +819,7 @@ object AutomateYara extends VolParse with SearchRange {
         println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
 
         yaraByIp = {
-          Try( s"python vol.py --conf-file=user_conf.txt yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
+          Try( s"python vol.py --conf-file=user_config.txt yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
             .getOrElse(s"No results for $ipNoPort in $pid")
         }
       }
@@ -847,10 +844,10 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findMalDocs(memFile: String, os: String, kdbg: String): Vector[YaraParse] = {
     var str = ""
     if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malicious_documents_rule.yar".!!.trim )
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-rules=malicious_documents_rule.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malicious_documents_rule.yar".!!.trim )
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -yara-rules=malicious_documents_rule.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -862,10 +859,10 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findWebshells(memFile: String, os: String, kdbg: String): Vector[YaraParse] = {
     var str = ""
     if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y webshell.yar".!!.trim )
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-rules=webshell.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y webshell.yar".!!.trim )
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=webshell.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -877,10 +874,10 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findCVE(memFile: String, os: String, kdbg: String): Vector[YaraParse] ={
     var str = ""
     if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y cve_rules.yar".!!.trim )
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-rules=cve_rules.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y cve_rules.yar".!!.trim )
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=cve_rules.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -892,10 +889,10 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findAntiDebug(memFile: String, os: String, kdbg: String):  Vector[YaraParse] = {
     var str = ""
     if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y antidebug_antivm.yar".!!.trim )
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-rules=antidebug_antivm.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y antidebug_antivm.yar".!!.trim )
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=antidebug_antivm.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -908,13 +905,12 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findPackers(memFile: String, os: String, kdbg: String):  Vector[YaraParse] = {
     var str = ""
     if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-file=packers_rule.yar".!!.trim )
+      str = Try( s"python vol.py --conf-file=user_config.txt yarascan --yara-rules=packers_rule.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-file=packers_rule.yar".!!.trim )
+      str = Try( s"python vol.py -f $memFile --profile=$os yarascan --yara-rules=packers_rule.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
-
 
     val packersParsed = parseYaraResults(str, "Packers").sortBy(_.owner)
 
@@ -1073,11 +1069,11 @@ object DetectRegPersistence extends VolParse {
     if(kdbg.nonEmpty){
       if (hid) {
         detectRegPersistence = {
-          Try(s"python vol.py --conf-file=user_conf.txt --offset=$offset".!!.trim).getOrElse("")
+          Try(s"python vol.py --conf-file=user_config.txt --offset=$offset".!!.trim).getOrElse("")
         }
       }else{
         detectRegPersistence = {
-          Try( s"python vol.py --conf-file=user_conf.txt handles --object-type=Key --pid=$pid".!!.trim ).getOrElse("")
+          Try( s"python vol.py --conf-file=user_config.txt handles --object-type=Key --pid=$pid".!!.trim ).getOrElse("")
         }
       }
     }
@@ -1147,7 +1143,7 @@ object DetectRegPersistence extends VolParse {
     for(key <- arr) {
       scanMap += {
         if(kdbg.nonEmpty){
-          (key -> Some( s"python --conf-file=user_conf.txt printkey -K $key".!!.trim ))
+          (key -> Some( s"python --conf-file=user_config.txt printkey -K $key".!!.trim ))
         }else{
           (key -> Some( s"python vol.py -f $memFile --profile=$os printkey -K $key".!!.trim ))
         }
@@ -1304,9 +1300,9 @@ object DllScan extends VolParse {
     var ldr = ""
     if(kdbg.nonEmpty){
       if(hid)
-        ldr = Try( s"python vol.py --conf-file=user_conf.txt --offset=$offset -v".!!.trim ).getOrElse("")
+        ldr = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset -v".!!.trim ).getOrElse("")
       else
-        ldr = Try( s"python vol.py --conf-file=user_conf.txt ldrmodules -p $pid -v".!!.trim ).getOrElse("")
+        ldr = Try( s"python vol.py --conf-file=user_config.txt ldrmodules -p $pid -v".!!.trim ).getOrElse("")
     }
     else {
       if (hid)
@@ -1382,7 +1378,6 @@ object DllScan extends VolParse {
         dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist -p $pid".!!.trim ).getOrElse("")
     } // END if/else kdbg.nonEmpty
 
-
     val parseAsterisks: Vector[String] = parseOutputAsterisks(dllList).getOrElse(Vector[String]())
 
     val commandLine = parseAsterisks.filter(_.contains("Command"))
@@ -1394,7 +1389,6 @@ object DllScan extends VolParse {
     val dllWithRemoveIAT = filterDLL.filterNot(_.contains("0xffff"))
 
     val dllWithProcRemoved: Vector[String] = dllWithRemoveIAT.filter(x => x.toLowerCase.contains(".dll"))
-
 
     /** RETURN Statement
       * We want to know pid, memory range, and commandline stuff. */
