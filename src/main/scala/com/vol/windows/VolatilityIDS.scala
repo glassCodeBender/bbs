@@ -49,8 +49,8 @@ object VolatilityIDS extends FileFun {
 
     val config: Vector[String] = parseConfig()
 
-    val memFile = config(0)
-    val os = config(1)
+    val memFile = config(1)
+    val os = config(0)
     var kdbg: String = config(2)
     var yara1: Option[String] = None
     var yara2: Option[String] = None
@@ -76,10 +76,13 @@ object VolatilityIDS extends FileFun {
 
     /** Check and make sure the memory file is valid */
     if (fileBool._1) {
+
+    }else{
       println( "The memory file you entered does not exist.\n\n" +
         s"Check and make sure ${fileBool._2} is the correct file name.\n\nExiting program..." )
       System.exit( 1 )
     }
+
 
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
     val dumpDir = mkDir( memFile )
@@ -103,7 +106,7 @@ object VolatilityIDS extends FileFun {
     val netConns = discoveryResult.net._1
 
     /** Examine individual processes */
-    val processDiscovery = ProcessDiscoveryWindows.run(os, memFile, process, netConns)
+    val processDiscovery = ProcessDiscoveryWindows.run(memFile, os, kdbg, process, netConns)
 
     /** Search for hidden executables. */
     val hiddenExecs = findHiddenExecs(process)
