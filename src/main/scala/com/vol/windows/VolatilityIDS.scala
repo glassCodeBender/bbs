@@ -109,13 +109,24 @@ object VolatilityIDS extends FileFun {
     val processDiscovery = ProcessDiscoveryWindows.run(memFile, os, kdbg, process, netConns)
 
     /** Search for hidden executables. */
-    val hiddenExecs = findHiddenExecs(process)
+    // val hiddenExecs = findHiddenExecs(process)
 
     /** Determine overall risk rating for memory image */
-    val riskRating = FindSuspiciousProcesses.run(discoveryResult, processDiscovery, hiddenExecs)
-
+    val riskRating = FindSuspiciousProcesses.run(discoveryResult, processDiscovery)
 
     /** Need to write extract parts of Discovery (proc), and pass it to next section of program. */
+
+    /** Write report */
+    CreateReport.run(memFile, os, processDiscovery, discoveryResult, riskRating)
+
+    /** Do scans not included w/ report and send to file. */
+
+    // envars
+    // extra yara scans
+
+    /** Move the files that were written to volatility directory into another file. */
+
+    // CleanUp.run()
 
   } // END main()
 
@@ -319,42 +330,7 @@ object VolatilityIDS extends FileFun {
     print(imageInfo.getOrElse(""))
   }
 */
-  /** Looks for hidden executables. */
-  private[this] def findHiddenExecs(vec: Vector[ProcessBbs]): Vector[String] = {
 
-    val hiddenExecPattern = {
-      Vector(".+//.xlsx.exe", ".+//.csv.exe", ".+//.doc.exe", ".+//.xls.exe", ".+//.xltx.exe", ".+//.xlt.exe",
-        ".+//.pdf.exe", ".+//.xlsb.exe", ".+//.xlsm.exe", ".+//.xlst.exe", ".+//.xml.exe", ".+//.txt.exe",
-        ".+//.ods.exe", ".+//.docx.exe", ".+//.dot.exe", ".+//.rtf.exe", ".+//.docm.exe", ".+//.dotm.exe",
-        ".+//.htm.exe", ".+//.mht.exe", ".+//.jpg.exe", ".+//.ppt.exe", ".+//.pptx.exe", ".+//.pot.exe",
-        ".+//.odp.exe", ".+//.ppsx.exe", ".+//.pps.exe", ".+//.pptm.exe", ".+//.potm.exe", ".+//.ppsm.exe",
-        ".+//.py.exe", ".+//.pl.exe", ".+//.eml.exe", ".+//.json.exe", ".+//.mp3.exe", ".+//.wav.exe", ".+//.aiff.exe",
-        ".+//.au.exe", ".+//.pcm.exe", ".+//.ape.exe", ".+//.wv.exe", ".+//.m4a.exe", ".+//.8svf.exe", ".+//.webm.exe",
-        ".+//.wv.exe", ".+//.wma.exe", ".+//.vox.exe", ".+//.tta.exe", ".+//.sln.exe", ".+//.raw.exe", ".+//.rm.exe",
-        ".+//.ra.exe", ".+//.opus.exe", ".+//.ogg.exe", ".+//.oga.exe", ".+//.mogg.exe", ".+//.msv.exe", ".+//.mpc.exe",
-        ".+//.mmf.exe", ".+//.m4b.exe", ".+//.ivs.exe", ".+//.ilkax.exe", ".+//.gsm.exe", ".+//.flac.exe",
-        ".+//.dvf.exe", ".+//.dss.exe", ".+//.dct.exe", ".+//.awb.exe", ".+//.amr.exe", ".+//.act.exe", ".+//.aax.exe",
-        ".+//.aa.exe", ".+//.3gp.exe", ".+//.webm.exe", ".+//.mkv.exe", ".+//.flv.exe", ".+//.vob.exe", ".+//.ogv.exe",
-        ".+//.ogg.exe", ".+//.gif.exe", ".+//.gifv.exe", ".+//.mng.exe", ".+//.avi.exe", ".+//.mov.exe", ".+//.qt.exe",
-        ".+//.wmv.exe", ".+//.yuv.exe", ".+//.rm.exe", ".+//.rmvb.exe", ".+//.asf.exe", ".+//.amv.exe", ".+//.mp4.exe",
-        ".+//.m4p.exe", ".+//.m4v.exe", ".+//.amv.exe", ".+//.asf.exe")
-    } // END hiddenExecPattern
-
-    /** Combine all the strings in the Vector to make a single regex */
-    val makeRegex = "(" + hiddenExecPattern.mkString("|") + ")"
-    val regex = makeRegex.r
-
-    /** Vector of process names. */
-    val procVec: Vector[String] = vec.map(x => x.name).distinct
-    val searchForHiddenProcs = procVec.map(x => regex.findFirstIn(x).getOrElse("None"))
-    val hiddenProcs = searchForHiddenProcs.filterNot(x => x.contains("None"))
-    if(hiddenProcs.nonEmpty) {
-      println("\nPrinting hidden executables.\n\n")
-      hiddenProcs.foreach(println)
-    }
-
-    return hiddenProcs
-  } // END hiddenExecPattern
 
   /**
     * This map will be periodically updated. I'm hoping that about 75% of the processes on regular systems will be
@@ -385,189 +361,6 @@ object VolatilityIDS extends FileFun {
     * outlook
     * cortana
     */
-  /** This Map of processes was created to avoid the computationally expensive lookup from the main process database.
-    * The program will first check this list before looking in the massive database of processes.
-    * This list also makes it easier to ensure that the information provided is accurate since it's easy to check.
-    */
-  private[windows] def commonProcesses(): Map[String, String] = {
-    val procMap = Map[String, String](
-    "SVCHOST.EXE" -> "The file svchost.exe is the Generic Host Process responsible for creating Services. Attackers commonly inject code into this process.",
-    "CSRSS.EXE" -> "The Microsoft Client Server Runtime Server subsystem utilizes the process for managing the majorify of the graphical instruction sets under the Microsoft Windows operating system. As such Csrss.exe provides the critical functions of the operating system. Csrss.exe controls threading and Win32 console window features.",
-    "WINLOGON.EXE" -> "winlogon.exe is a process belonging to the Windows login manager. It handles the login and logout procedures on your system.",
-    "ADSERVICE.EXE" -> "Active Disk Service is a component of the Iomega zip drive.",
-    "APPSERVICES.EXE" -> "For the Iomega zip drive.",
-    "MSIMN.EXE" -> "Outlook Express",
-    "CCSETMGR.EXE" -> "Also associated with Symantec’s Internet Security Suite. Keep it and protect your PC.",
-    "CSRSS.EXE" -> " System process that is the main executable for the Microsoft Client / Server Runtim Server Subsystem. It should not be shut down.",
-    "CTFMON.EXE" -> " non-essential system process. If you’re using only English as the language, then it is not needed. However, it’s recommended to leave it alone.",
-    "EXPLORER.EXE" -> " This must always be running in the background. It’s a user interface process that runs the windows graphical shell for the desktop, task bar, and Start menu.",
-    "IEXPLORE.EXE" -> " Internet Explorer browser. But why are you using it unless it’s for a site that doesn’t work in any other browser? Use Firefox instead.",
-    "LSASS.EXE" -> "Security Authority Service is a Windows security related system process for handling local security and login policies.",
-    "NC.EXE" -> "Netcat listener. Commonly used by hackers to create backdoors. Also used by for sharing files and other tasks.",
-    "NAVAPSVC.EXE" -> "These are Symantec’s North AnvtiVirus processes. They or whatever virus program you use should run all the time.",
-    "NVSRVC32.EXE" -> "These are Symantec’s North AnvtiVirus processes. They or whatever virus program you use should run all the time.",
-    "NAVAPW32.EXE" -> "These are Symantec’s North AnvtiVirus processes. They or whatever virus program you use should run all the time.",
-    "REALSCHED.EXE" -> "RealNetworks Scheduler is not an essential process. It checks for updates for RealNetworks products. It can be safely disabled.",
-    "RUNDLL32.EXE" -> "A system process that executes DLLs and loads their libraries.",
-    "SAVSCAN.EXE" -> "Nortons AntiVirus process.",
-
-      "SEARCHINDEXER.EXE" -> "Standard Windows process",
-      "WMIPRVSE.EXE" -> "Standard Windows Process.",
-      "TASKLIST.EXE" -> "Executable used to grab Windows processes",
-      "SEARCHUI.EXE" -> "Standard Windows process.",
-      "SKYPEHOST.EXE" -> "Skype",
-      "ONEDRIVE.EXE" -> "Microsoft OneDrive",
-      "MSASCUIL.EXE" -> "Standard Windows process.",
-      "SHELLEXPERIENCEHOST.EXE" -> "Standard Windows process.",
-      "RUNTIMEBROKER.EXE" -> "Standard Windows process.",
-      "NISSRV.EXE" -> "Standard",
-      "BACKGROUNDTASKHOST.EXE" -> "Standard Windows process.",
-      "POWERSHELL.EXE" -> "Windows Powershell",
-      "VMTOOLSD.EXE" -> "VMware Tools.",
-      "VMACTHLP.EXE" -> "VMware Physical Disk Helper",
-      "DWM.EXE" -> "Standard Windows process.",
-      "MICROSOFTEDGE.EXE" -> "Microsoft Edge",
-      "MICROSOFTEDGECP.EXE" -> "Microsoft Edge",
-      "INSTALLAGENT.EXE" -> "",
-      "BROWSER_BROKER.EXE" -> "Used for web browsers",
-      "SNIPPINGTOOL.EXE" -> "Windows Snipping Tool",
-      "HXCALENDARAPPIMM.EXE" -> "Windows Calendar",
-      "HXTSR.EXE" -> "Windows Calendar",
-      "CALCULATOR.EXE" -> "Windows Calculator",
-      "WINDOWSCAMERA.EXE" -> "Windows Webcam Program",
-      "ONENOTEIM.EXE" -> "Microsoft OneNote",
-      "SOLITAIRE.EXE" -> "Microsoft Solitaire",
-      "GAMEBARPRESENCEWRITER.EXE" -> "Used for Microsoft games like Solitaire",
-      "MUSIC.UI.EXE" -> "Groove Music",
-      "MICROSOFT.PHOTOS.EXE" -> "Microsoft Photos",
-      "AUDIODG.EXE" -> "Microsoft Audio",
-      "MAPS.EXE" -> "Microsoft maps",
-      "SOUNDREC.EXE" -> "Microsoft Sound Recorder",
-      "WINSTORE.APP.EXE" -> "Microsoft Application Store",
-      "WMPLAYER.EXE" -> "Windows Media Player",
-      "SYNTPENH.EXE" -> "Synaptics TouchPad 64 bit enhancements",
-      "SYNTPHELPER.EXE" -> "Synaptics Pointing Device Helper",
-      "SIHOST.EXE" -> "Microsoft Shell Infrastructure Host",
-      "CONHOST.EXE" -> "Console Window Host",
-      "MSMPENG.EXE" -> "Windows Defender Background Tasks",
-      "TASKHOSTW.EXE" -> "Starts Windows services when OS starts up. For Windows 10 only.",
-      "TASKHOSTEX.EXE" -> "Starts Windows services when OS starts up. For Windows 8 only.",
-      "TASKHOST.EXE" -> "Starts Windows services when OS starts up. For Windows 7 only.",
-
-    "SERVICES.EXE" -> "An essential process that manages the starting and stopping of services including the those in boot up and shut down. Do not terminate it.",
-    "SMSS.EXE" -> " Session Manager SubSystem is a system process that is a central part of the Windows operating system.",
-    "SPOOLSV.EXE" -> " Microsoft printer spooler service handles local printer processes. It’s a system file.",
-    "SVCHOST.EXE" -> " You may have more than six appearances of this process or less. It’s there multiple times to handle processes executed from DLLs. Leave it there.",
-    "SYSTEM" -> " This is a file that stores information related to local hardware settings in the registry under ‘HKEY_LOCAL_MACHINE’. Kill it and kiss your PC’s stability bye bye.",
-    "SYSTEM IDELE PROCESS" -> "Calculates the amount of CPU currently in use by applications. This won’t go away no matter how hard you try. Don’t try it, OK?",
-    "TASKMGR.EXE" -> "Task Manager. Appears when you press Ctrl+Alt+Del.",
-    "WDFMGR.EXE" -> " Windows Driver Foundation Manager is part of Windows media player 10 and newer. Better not to stop the process.",
-    "WINLOGON.EXE" -> " Handles the login and logout processes. It’s essential.",
-    "WINWORD.EXE" -> " Microsoft word.",
-    "FIREFOX.EXE" -> "Firefox browser",
-    "CHROME.EXE" -> "Google chrome browser",
-    "ADOBEARM.EXE" -> "Belongs to Adobe Acrobat and Adobe Reader. The process runs in the background and checks for updates to Adobe products.",
-    "DIVXUPDATE.EXE" -> "Runs in the background and checks for updates to DivX Plus. You can simply terminate the updater; it launches automatically when you open any DivX program.",
-    "WINWORD.EXE" -> " Microsoft word.",
-    "FIREFOX.EXE" -> "Firefox browser",
-    "CHROME.EXE" -> "Google chrome browser",
-    "PSEXEC.EXE" -> "PsExec provides utilities like Telnet and remote control programs like Symantec's PC Anywhere. Commonly used by hackers",
-    "WCE.EXE" -> "Windows Credential Editor is a security tool to list logon sessions and add, change, list, and delete associated credentials. Can be used to perform pass-the-hash and obtain security credentials",
-    "SAMINSIDE.EXE" -> "A program that allows users to both recover and crack Windows password hashes. Commonly used by hackers.",
-    "WC.EXE" -> "Windows Credential Editor is a security tool to list logon sessions and add, change, list, and delete associated credentials. Can be used to perform pass-the-hash and obtain security credentials",
-    "CCEVTMRG.EXE" -> "Associated with Symantec’s Internet Security Suite. Keep it and protect your PC.",
-    "READER_SL.EXE" -> "Part of Adobe Reader and stands for Adobe Acrobat Speed Launcher. It speeds up the launch of the reader, but isn’t actually necessary.",
-    "JQS.EXE" -> "Accelerates the launch of almost all software that works with Java. The Java Quick Starter isn’t really necessary.",
-    "OSA.EXE" -> "Enables some Microsoft Office programs in Windows XP to launch more quickly and anchors certain Office functions to the start menu. The Office Source Engine may be of interest to regular Office users, but probably not to others.",
-    "SOFFICE.EXE" -> "Fulfills the same purpose as Osa.exe, but for the Office packages StarOffice and OpenOffice.",
-    "ADOBEARM.EXE" -> "Belongs to Adobe Acrobat and Adobe Reader. The process runs in the background and checks for updates to Adobe products.",
-    "JUSCHED.EXE" -> "Stands for Java Update Scheduler. Once a month, the process checks whether there is a new update for Java, which is quite infrequent for a process that’s always running.",
-    "DIVXUPDATE.EXE" -> "Runs in the background and checks for updates to DivX Plus. You can simply terminate the updater; it launches automatically when you open any DivX program.",
-    "NEROCHECK.EXE" -> "Searches for drivers that could trigger conflicts with Nero Express, Nero, and NeroVision Express. You can also start this service manually if necessary.",
-    "HKCMD.EXE" -> "Accompanies Intel hardware. The process allows the user to allocate any function to the keys, but also often leads to a sluggish system.",
-    "ATIPTAXX.EXE" -> "Comes with ATI video card drivers. The processes provide faster access to the graphics card settings on the taskbar or individual keys.",
-    "ATI2EVXX.EXE" -> "Comes with ATI video card drivers. The processes provide faster access to the graphics card settings on the taskbar or individual keys.",
-    "RAVCPL64.EXE" -> "Realtek HD Audio Manager. The process detects which audio devices are connected to your computer, including headphones or a microphone. Conveniently, the devices are also recognized without the process and will run anyway.",
-    "NWIZ.EXE" -> "Usually accompanies a NVIDIA graphics card.",
-    "CCC.EXE" -> "ATI Catalyst Control Center. For gamers and users with higher demands for the graphic settings on their PC, this is certainly interesting; for everyone else, it’s not necessary.",
-    "SYNTPENH.EXE" -> "Is used on many laptops and has drivers for touchpads, but Windows can provide these too. In addition, Synaptics TouchPad Enhancements is a known solution for stability problems.",
-    "WINAMPA.EXE" -> "Places Winamp to the right at the bottom of the taskbar and makes sure that no other programs with media content are linked.",
-    "ITUNESHELPER.EXE" -> "works in the background for iTunes and QuickTime. If the process runs without these programs, it can be stopped safely -- iTunes starts it automatically if needed.",
-    "IPODSERVICE.EXE" -> "Works in the background for iTunes and QuickTime. If the process runs without these programs, it can be stopped safely -- iTunes starts it automatically if needed.",
-    "OSPPSVC.EXE" -> "Comes with Microsoft Office 2010. The Office Software Protection Platform verifies that Office still has a valid licence.",
-    "SIDEBAR.EXE" -> "Makes the practical widgets on Windows 7 and Vista possible, but also eats up a lot of memory. Anyone who doesn’t use the widgets can stop Sidebar.exe.",
-    "WMPNETWK.EXE" -> "Searches the network for media files in order to populate them into Windows Media Player. If you don’t use the media player, or don’t want to search for new files, you can stop the service.",
-    "JUSCHED.EXE" -> "Stands for Java Update Scheduler. Once a month, the process checks whether there is a new update for Java, which is quite infrequent for a process that’s always running.",
-    "ATIPTAXX.EXE" -> "Comes with ATI video card drivers. The processes provide faster access to the graphics card settings on the taskbar or individual keys.",
-    "ATI2EVXX.EXE" -> "Comes with ATI video card drivers. The processes provide faster access to the graphics card settings on the taskbar or individual keys.",
-    "ITUNESHELPER.EXE" -> "works in the background for iTunes and QuickTime. If the process runs without these programs, it can be stopped safely -- iTunes starts it automatically if needed.",
-    "IPODSERVICE.EXE" -> "Works in the background for iTunes and QuickTime. If the process runs without these programs, it can be stopped safely -- iTunes starts it automatically if needed."
-    )
-
-    return procMap
-  } // END commonProcesses()
-
-} // END VolatilityIDS object
-
-/****************************************************************************************************/
-/****************************************************************************************************/
-/*********************************** ProcessDescription Object **************************************/
-/****************************************************************************************************/
-/****************************************************************************************************/
-
-object ProcessDescription {
-
-  private[windows] def get( processName: String ): String = {
-    val firstTwo = processName.take( 2 )
-    val byteInt = firstTwo.getBytes()
-      .map( x => x.toInt.toString ).foldLeft( "" )( ( x, y ) => x + y ).toInt
-
-    val tree: TreeMap[String, String] = matchProcess( byteInt )
-    val description = tree( processName )
-
-    return description
-  } // get()
-
-  /** This is an example of how we'll retrieve the process description. */
-  private[this] def matchProcess( byteInt: Int ): TreeMap[String, String] = {
-
-    val value = byteInt
-    var result = new TreeMap[String, String]()
-
-    if (4848 until 6575 contains value) result = Proc00AK.get()
-    else if (6585 until 6682 contains value) result = ProcAUBR.get()
-    else if (6683 until 6773 contains value) result = ProcBSCI.get()
-    else if (6774 until 6778 contains value) result = ProcCJCN.get()
-    else if (6779 until 6787 contains value) result = ProcCOCW.get()
-    else if (6787 until 6875 contains value) result = ProcCXDK.get()
-    else if (6876 until 6973 contains value) result = ProcDLEI.get()
-    else if (6974 until 7072 contains value) result = ProcEJFH.get()
-    else if (7073 until 7279 contains value) result = ProcFIHO.get()
-    else if (7280 until 7367 contains value) result = ProcHPIC.get()
-    else if (7368 until 7378 contains value) result = ProcIDIN.get()
-    else if (7379 until 7576 contains value) result = ProcIOKL.get()
-    else if (7577 until 7676 contains value) result = ProcKMLL.get()
-    else if (7677 until 7766 contains value) result = ProcLMMB.get()
-    else if (7767 until 7775 contains value) result = ProcMCMK.get()
-    else if (7776 until 7788 contains value) result = ProcMLMX.get()
-    else if (7789 until 7880 contains value) result = ProcMYNP.get()
-    else if (7881 until 7982 contains value) result = ProcNQOR.get()
-    else if (7983 until 8070 contains value) result = ProcOSPF.get()
-    else if (8071 until 8082 contains value) result = ProcPGPR.get()
-    else if (8083 until 8265 contains value) result = ProcPRRA.get()
-    else if (8266 until 8280 contains value) result = ProcRBRP.get()
-    else if (8281 until 8367 contains value) result = ProcRRSC.get()
-    else if (8368 until 8375 contains value) result = ProcSDSK.get()
-    else if (8376 until 8383 contains value) result = ProcSLSS.get()
-    else if (8384 until 8466 contains value) result = ProcSTTB.get()
-    else if (8467 until 8483 contains value) result = ProcTCTS.get()
-    else if (8484 until 8667 contains value) result = ProcTTVC.get()
-    else if (8668 until 8766 contains value) result = ProcVDWB.get()
-    else if (8767 until 8782 contains value) result = ProcWCWR.get()
-    else if (8783 until 9090 contains value) result = ProcWSZZ.get()
-
-    return result
-  } // END matchProcess()
 
 } // END ProcessDescription object
 
@@ -577,7 +370,7 @@ final case class RiskRating(riskRating: Integer)
 /** Class looks at the results of previous scans and determines if indicators of a breach were found. */
 object FindSuspiciousProcesses {
 
-  def run(disc: Discovery, process: ProcessBrain, hiddenExecs: Vector[String]): Int = {
+  def run(disc: Discovery, process: ProcessBrain): Int = {
 
     /**
       * MISSING:
@@ -658,8 +451,8 @@ object FindSuspiciousProcesses {
     val remoteMappedRisk = checkRemoteMapped(remoteMapped)
 
     /** Contains risk value */
-    val (shimRisk, shimCacheTime): (Int, Vector[ShimCache]) = checkShimCacheTime(shim)
-    riskRating = riskRating + shimRisk
+    // val (shimRisk, shimCacheTime): (Int, Vector[ShimCache]) = checkShimCacheTime(shim)
+    // iskRating = riskRating + shimRisk
     /**
       * Need to look at the parents of hidden processes. Is it cmd.exe or powershell.exe?
       */
@@ -831,7 +624,7 @@ object FindSuspiciousProcesses {
     * LOOK AT LAST UPDATE!!
     *
     */
-
+/*
   private[this] def checkShimCacheTime(vec: Vector[ShimCache]): (Int, Vector[ShimCache]) = {
 
     var riskRating = 0
@@ -860,7 +653,7 @@ object FindSuspiciousProcesses {
 
     return (riskRating, concatShells)
   } // END checkShimCacheTime()
-
+*/
   private[this] def checkRootKitResults(root: RootkitResults) = {
 
 
@@ -871,7 +664,6 @@ object FindSuspiciousProcesses {
   } // END checkRootkitResults
 
   private[this] def checkRegistry(vec: Vector[RegPersistenceInfo]) = {
-
 
     var riskRating = 0
     var reportStr = ""
