@@ -68,7 +68,7 @@ final case class Discovery( proc: (Vector[ProcessBbs], String),               //
                             rootkit: RootkitResults,                       // RootkitResults
                             remoteMapped: Vector[(String, String)],        // (pid -> RemoteMappedDrive Found)
                             registry: (Vector[String], Vector[String]),     // (User Registry, System Registry)
-                            shimCache: Vector[ShimCache],
+                            shimCache: String,
                             mftFileName: String
                           )
 
@@ -103,7 +103,7 @@ final case class ProcessBbs( pid: String,
       if this.ppid == proc.pid
     } yield proc.name
 
-    if (parent.isEmpty) s"None"
+    if (ppid == "0") s"None"
     else parent.mkString
   } // END parentName()
 
@@ -128,6 +128,7 @@ final case class ProcessBbs( pid: String,
     } yield value
 
     if (this.ppid == "0") result
+    else if(result.isEmpty) result
     else  result(0) +: result(0).getParents(vec)
 
   } // END getParents()
@@ -155,6 +156,13 @@ object VolDiscoveryWindows extends VolParse {
 
     /** Contains Vector of processes and a ProcessBbs Tree */
     val processScanResults: (Vector[ProcessBbs], String) = ProcessBbsScan.run(memFile, os, kdbg)
+
+
+    // val testGetParents = processScanResults._1
+    // val parents = testGetParents(4).getParents(testGetParents)
+
+    // println("Trying to print parents...")
+    // parents.foreach(println)
 
     /**
       * WARNING!!!!
@@ -251,8 +259,7 @@ object VolDiscoveryWindows extends VolParse {
 
     val key1 =  "\"HKEY_CURRENT_USER\\Software\\Microsoft\\CurrentVersion\\RunOnce\""
     val key2 = "\"HKEY_CURRENT_USER\\Software\\Microsoft\\CurrentVersion\\Run\""
-
-
+    
     var runOnce = ""
     var run = ""
 
@@ -275,7 +282,7 @@ object VolDiscoveryWindows extends VolParse {
     dir.mkdir()
 
     // val csvFileName = memFile + Calendar.HOUR + "-" + Calendar.MINUTE + ".csv"
-    val mftFileName: String = memFile + Calendar.HOUR + "-" + Calendar.MINUTE + ".body"
+    val mftFileName: String = memFile + "_MFT" + ".body"
     // Outputting MFT as body file so it's easily parsed w/ sleuthkit
 
     if(kdbg.nonEmpty) {
@@ -317,7 +324,7 @@ object VolDiscoveryWindows extends VolParse {
     * == Should also check for timestomping in registry
     */
 
-  private[this] def shimCacheEntries(memFile: String, os: String, kdbg: String): Vector[ShimCache] = {
+  private[this] def shimCacheEntries(memFile: String, os: String, kdbg: String): String = {
 
     var shimcache = ""
     if(kdbg.nonEmpty){
@@ -342,7 +349,7 @@ object VolDiscoveryWindows extends VolParse {
     } println(value + "\n")
 
 
-    return shimVec
+    return shimcache
   } // END shimCacheEntries()
   /**
     * Get the results of checking system registry keys sometimes indicative of persistence
@@ -1658,7 +1665,7 @@ object RootkitDetector extends VolParse {
     return (unknownModules, callbacks)
   } // callbackScan()
 
-  private[this] def driverScan(memFile: String, os: String, kdbg: String) = {
+  private[this] def driverScan(memFile: String, os: String, kdbg: String): String = {
 
     var driverScan = ""
     if(kdbg.nonEmpty){
@@ -1673,7 +1680,7 @@ object RootkitDetector extends VolParse {
       }
     }
 
-
+    return driverScan
     // Re-read Stealthy Hooks section and consider writing python plugin
 
   } // END driverScan()
@@ -1770,18 +1777,18 @@ object RemoteMappedDriveSearch extends VolParse {
     */
   private[this] def remoteMapped(memFile: String, os: String, kdbg: String): Vector[(String, String)] = {
     var remoteMapped = ""
-    if(kdbg.nonEmpty){
+    if (kdbg.nonEmpty) {
       remoteMapped = {
-        Try( s"python vol.py --conf-file=user_config.txt handles -t File, Mutant".!!.trim ).getOrElse("")
+        Try(s"python vol.py --conf-file=user_config.txt handles -t File, Mutant".!!.trim).getOrElse("")
       }
-    }else{
-      remoteMapped = Try( s"python vol.py -f $memFile --profile=$os handles -t File, Mutant".!!.trim ).getOrElse("")
+    } else {
+      remoteMapped = Try(s"python vol.py -f $memFile --profile=$os handles -t File, Mutant".!!.trim).getOrElse("")
     }
 
-    val remoteSearchLines: Option[Vector[String]] = parseOutputNoHeader( remoteMapped )
+    val remoteSearchLines: Option[Vector[String]] = parseOutputNoHeader(remoteMapped)
 
     val remoteMapFilter: Vector[String] = remoteSearchLines.getOrElse(Vector[String]())
-      .filter( _.contains( "Mup\\;" ) )
+      .filter(_.contains("Mup\\;"))
 
     val lanman: Vector[String] = remoteSearchLines.getOrElse(Vector[String]())
       .filter(_.contains("LanmanRedirector\\;"))
@@ -1797,6 +1804,7 @@ object RemoteMappedDriveSearch extends VolParse {
     remoteTup.foreach(println)
 
     return remoteTup
+  }
 /*
     // Pattern looks for Device\Mup\;[A-Z]:\w+
     val mupPattern = "(?<=\\w+Mup\\)[;][a-zA-Z]+".r
@@ -1830,7 +1838,7 @@ object RemoteMappedDriveSearch extends VolParse {
 
     return remoteMappedDict
     */
-  } // END remoteMapped()
+   // END remoteMapped()
 
   /** Skipping symlinkscan for now because it's unnecessary */
 /*
