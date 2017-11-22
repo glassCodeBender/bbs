@@ -1,10 +1,11 @@
 package com.bbs.vol.windows
 
 import com.bbs.vol.processtree._
+import com.bbs.vol.utils.FileFun
 
 import scala.collection.immutable.TreeMap
 
-object CreateReport {
+object CreateReport extends FileFun {
 
   private[windows] def run(memFile: String, os: String, process: ProcessBrain, disc: Discovery, riskRating: Int) = {
     /** Using StringBuilder for fast concatenation of Strings. */
@@ -47,13 +48,15 @@ object CreateReport {
     /** Yara malware findings */
     val malware: String = malwareFound(yaraObj)
 
-    if(malware.nonEmpty) report.append("\tMalware Found: None")
+    if(malware.nonEmpty)
+      report.append("\tMalware Found: None")
 
     report.append(malware)
     report.append("Significant Findings:\n\n")
 
     /**\tDisabled Services */
-    if(svc.nonEmpty) report.append("\tThe following suspicious services were disabled.\n\t" + svc.mkString("\n\t"))
+    if(svc.nonEmpty)
+      report.append("\tThe following suspicious services were disabled.\n\t" + svc.mkString("\n\t"))
 
     /**\tRemote Mapped Drives */
     val mappedDriveVec = mappedDrives(remoteMapped)
@@ -63,10 +66,12 @@ object CreateReport {
 
     /** \tUnlinked DLLs*/
     val ldrInfoCheck = ldrCheck(ldr)
+
     report.append(ldrInfoCheck)
 
     /**\tRootkits Found */
     val rootkitInfo = rootkitCheck(rootkit)
+
     report.append(rootkitInfo)
 
     /** \tPromiscuous Mode*/
@@ -92,15 +97,15 @@ object CreateReport {
 
     /** \tMemory Leaks*/
     val leaks = memoryLeaks(regPersist)
-    if(leaks.nonEmpty) report.append(leaks)
+    if(leaks.nonEmpty)
+      report.append(leaks)
 
     /** Run findHiddenExecs() and say if any execs were found. */
-
     val hiddenExec = findHiddenExecs(proc)
-    if(hiddenExec.nonEmpty) report.append(hiddenExec)
+    if(hiddenExec.nonEmpty)
+      report.append(hiddenExec)
 
     /** Suspicious Console Commands */
-
     if(sysSt.suspCmds.nonEmpty){
       report.append("\n\tThe following potentially suspicious exams were found in the commandline info: \n\t")
       report.append(sysSt.suspCmds.mkString("\n\t"))
@@ -114,6 +119,16 @@ object CreateReport {
 
     /** PROCESS INFO */
 
+    val procTree = disc.proc._2
+    report.append("\nProcess Tree Results:\n\n" + procTree )
+
+    val processInfo = writeProcessInfo(process, disc, yaraObj)
+
+    report.append(processInfo)
+
+    /** Write Report to File */
+    writeToFile("BBS_Report_" + memFile + ".txt", report.toString)
+
   } // END run()
 
   /*****************************************************************
@@ -122,7 +137,7 @@ object CreateReport {
     * **************************************************************
     ****************************************************************/
 
-  private[this] def writeProcessInfo(procBrain: ProcessBrain, disc: Discovery, yara: YaraBrain, ldr: LdrInfo): String = {
+  private[this] def writeProcessInfo(procBrain: ProcessBrain, disc: Discovery, yara: YaraBrain): String = {
 
     /** Vector[ProcessBbs] */
     val vec = disc.proc._1
@@ -142,81 +157,156 @@ object CreateReport {
 
   private[this] def writeEachProcess(proc: ProcessBbs, yara: YaraBrain, ldr: Vector[LdrInfo],
                                      net: Vector[NetConnections], procBrain: ProcessBrain, disc: Discovery): String = {
+
     val procInfo: Vector[ProcessBbs] = disc.proc._1
     var description = ""
     val report = new StringBuilder()
+
     description = commonProcesses(proc.name.toUpperCase)
-    if(description.isEmpty) description = ProcessDescription.get(proc.name.toUpperCase)
+
+    if(description.isEmpty)
+      description = ProcessDescription.get(proc.name.toUpperCase)
 
     val ppidVec = procInfo.filter(x => x.ppid.contains(proc.pid))
     var ppidName = ""
-    if(ppidVec.nonEmpty) ppidName = ppidVec.head.ppid
+
+    if(ppidVec.nonEmpty)
+      ppidName = ppidVec.head.ppid
 
     report.append("Name: " + proc.name + "  PID: " + proc.pid )
-    if(ppidName.nonEmpty) report.append("\nParent Name: " + ppidName)
-    if(description.nonEmpty) report.append("\nDescription: " + description)
-    if(proc.hidden)report.append("\nHidden: True")
+
+    if(ppidName.nonEmpty)
+      report.append("\nParent Name: " + ppidName)
+
+    if(description.nonEmpty)
+      report.append("\nDescription: " + description)
+
+    if(proc.hidden)
+      report.append("\nHidden: True")
+
+    /** Check if metepreter dll was found in process or in parent. */
+    val ldrPid = ldr.filter(x => x.pid.contains(proc.pid))
+    val ldrPpid = ldr.filter(x => x.pid.contains(proc.ppid))
+
+    if(ldrPid.nonEmpty){
+      val ldr = ldrPid.head
+      if(ldr.meterpreter)
+        report.append("\nMeterpreter DLL Found: True!!!!!!")
+    }
+    if(ldrPpid.nonEmpty){
+      val ldr = ldrPpid.head
+      if(ldr.meterpreter)
+        report.append(s"\nMeterpreter DLL Found in Parent Process $ppidName: True!!!!!!")
+    }
 
     /** Add Dll command found */
     val dll: Vector[DllInfo] = procBrain.dllInfo
     val dllPerPid = dll.filter(x => x.pid.contains(proc.pid))
     var dllCommand = ""
-    if(dllPerPid.nonEmpty) dllCommand =  dllPerPid.head.command
-    if(dllCommand.nonEmpty) report.append("\nCommandline Info: " + dllCommand)
 
+    if(dllPerPid.nonEmpty)
+      dllCommand =  dllPerPid.head.command
+    if(dllCommand.nonEmpty)
+      report.append("\nCommandline Info: " + dllCommand)
+
+    /** Check yara for malicious signatures found  */
     val checkYaraPid = checkYaraPerProcess(proc.pid, yara)
     val checkYaraPpid = checkYaraPerProcess(proc.ppid, yara)
-    if(checkYaraPid.nonEmpty) report.append("\nMalicious Signatures Found in Process:" + checkYaraPid)
-    if(checkYaraPpid.nonEmpty) report.append("\nMalicious Signatures Found in Parent Process:" + checkYaraPpid)
+
+    if(checkYaraPid.nonEmpty)
+      report.append("\nMalicious Signatures Found in Process:" + checkYaraPid)
+    if(checkYaraPpid.nonEmpty)
+      report.append("\nMalicious Signatures Found in Parent Process:" + checkYaraPpid)
 
     // val remoteMapped = disc.remoteMapped
 
     /** Check if registry persistence occurred for process or parent.  */
-    val regPersist = procBrain.regPersistence
-    val persistence = regPersist.filter(x => x.pid.contains(proc.pid))
-    val ppidPersistence = regPersist.filter(x => x.pid.contains(proc.ppid))
+    val regPersist: Vector[RegPersistenceInfo] = procBrain.regPersistence
+    val persistence = regPersist.filter(x => x.handles.pid.contains(proc.pid))
+    val ppidPersistence = regPersist.filter(x => x.handles.pid.contains(proc.ppid))
 
     /** There should only be one */
     if(persistence.nonEmpty) {
       val persistMap = persistence.head.scanMap
-      val pidResult = persistMap(proc.pid).getOrElse("")
-      val ppidResult = persistMap(proc.ppid).getOrElse("")
-      if (pidResult.nonEmpty) {
-        if (!pidResult.contains("0")) {
+      val pidResult = persistMap.getOrElse(proc.pid, Some("0"))
+      val ppidResult = persistMap.getOrElse(proc.ppid, Some("0"))
+      if (pidResult.getOrElse("0") != "0") {
           report.append("\n\nRegistry Persistence Info For Current Process: " + ppidPersistence.head)
-
         } // END if registry persistence exists
-      } // END if persistMap exists
-
-      if (ppidResult.nonEmpty) {
-        if (!ppidResult.contains("0")) {
-          report.append("\n\nRegistry Persistence Info For Current Process: " + ppidPersistence.head)
-
-        } // END if registry persistence exists
+      if (ppidResult.getOrElse("0") != "0") {
+          report.append(s"\n\nRegistry Persistence Info For Parent Process $ppidName PID ${proc.ppid}: " + ppidPersistence.head)
       } // END if persistMap exists
     } // END persistenceMap.nonEmpty
 
     /** Add information about privileges */
     val privs = procBrain.privs
     val priv = privs.filter(x => x.pid.contains(proc.pid))
+
     if(priv.nonEmpty) {
       val privResult = priv.head
-      if(privResult.debugPriv)report.append("\nDebug Privilege was explicitly enabled. Attackers commonly do this.\n\n")
-      report.append("Suspicious Privileges:\n" + priv.head.suspiciousPrivs.mkString("\n"))
-      if(privResult.enabledPrivs.nonEmpty) report.append("The following privileges were explicitly enabled:\n" +
-        privResult.enabledPrivs.mkString("\n"))
+
+      if(privResult.debugPriv){
+        report.append("\nDebug Privilege was explicitly enabled. Attackers commonly do this.\n\n")
+        report.append("Suspicious Privileges:\n" + priv.head.suspiciousPrivs.mkString("\n"))
+      }
+
+      if(privResult.enabledPrivs.nonEmpty) {
+        report.append("The following privileges were explicitly enabled:\n" +
+          privResult.enabledPrivs.mkString("\n"))
+      }
+
     } // END priv nonEmpty
 
     /** Networking capability */
-    /** URLs found by yara */
+    // val netActivityMap = procBrain.netActivity
 
+    // if(netActivityMap(proc.pid))report.append("\nNetworking Activity: True")
+    //else report.append("\nNetworking Activity: Unknown")
 
+    /** Add information about outside ip addresses */
+    val connections = netActivity(disc.net._1, proc.pid)
+    if(connections.nonEmpty) report.append(connections)
 
+    /** Malfind Results */
+    val malfind = procBrain.malfind.getOrElse(proc.pid, "")
+    val ppidMalfind = procBrain.malfind.getOrElse(proc.ppid, "")
+
+    if(malfind.nonEmpty)
+      report.append("\nMalfind found the following results for " + proc.name + s"\n\n$malfind")
+    if(ppidMalfind.nonEmpty)
+      report.append(s"\nMalfind found the following results for the parent of ${proc.name}: $ppidName PID ${proc.ppid}\n\n$ppidMalfind")
+
+    val urls = checkYaraLessImportant(yara, proc.pid)
+
+    if(urls.nonEmpty) report.append(urls)
 
     report.append("\n*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*\n\n")
 
     return report.toString
   } // writeEachProcess()
+
+  private[this] def netActivity(vec: Vector[NetConnections], pid: String): String = {
+    var str = ""
+    val pids = vec.filter(x => x.pid.contains(pid))
+    val srcIps = pids.map(x => x.srcIP)
+    val destIps = pids.map(x => x.destIP)
+    /** Removing local ip addresses */
+    val srcFiltered = {
+      srcIps.filterNot(_.startsWith("192\\.")).filterNot(_.startsWith("172\\.")).filterNot(_.startsWith("10\\."))
+    }
+    val destFiltered = {
+      destIps.filterNot(_.startsWith("192\\.")).filterNot(_.startsWith("172\\.")).filterNot(_.startsWith("10\\."))
+    }
+    if(srcFiltered.nonEmpty){
+      str = "\nThe following external source IP addresses were found:\n" + srcFiltered.mkString("\n")
+    }
+    if(destFiltered.nonEmpty){
+      str = str + "\nThe following external destination IP addresses were found:\n" + destFiltered.mkString("\n")
+    }
+
+    return str
+  } // END netActivity()
+
 
   /** Grab Yara info from processes */
   private[this] def checkYaraPerProcess(pid: String, yara: YaraBrain): String = {
@@ -245,13 +335,20 @@ object CreateReport {
       val pidExploit = exploitkits.filter(x => x.owner.contains(pid))
 
       /** Append to StringBuilder if found */
-      if (pidMal.nonEmpty) report.append("\n\nMalware Signatures Found:\n\n" + pidMal.mkString("\n"))
-      if (pidAnti.nonEmpty) report.append("\n\nAntidebug Signatures Found:\n\n" + pidAnti.mkString("\n"))
-      if (pidCVE.nonEmpty) report.append("\n\nCVEs(Malware) Found:\n\n" + pidCVE.mkString("\n"))
-      if (pidExploit.nonEmpty) report.append("\n\nExploit Kits Found:\n\n" + pidExploit.mkString("\n"))
-      if (pidShells.nonEmpty) report.append("\n\nWebshells Found:\n\n" + pidShells.mkString("\n"))
-      if (pidMalDoc.nonEmpty) report.append("\n\nMalicious Documents Found:\n\n" + pidMalDoc.mkString("\n"))
-      if (pidPack.nonEmpty) report.append("\n\nPackers Found:\n\n" + pidPack.mkString("\n"))
+      if (pidMal.nonEmpty)
+        report.append("\n\nMalware Signatures Found:\n\n" + pidMal.mkString("\n"))
+      if (pidAnti.nonEmpty)
+        report.append("\n\nAntidebug Signatures Found:\n\n" + pidAnti.mkString("\n"))
+      if (pidCVE.nonEmpty)
+        report.append("\n\nCVEs(Malware) Found:\n\n" + pidCVE.mkString("\n"))
+      if (pidExploit.nonEmpty)
+        report.append("\n\nExploit Kits Found:\n\n" + pidExploit.mkString("\n"))
+      if (pidShells.nonEmpty)
+        report.append("\n\nWebshells Found:\n\n" + pidShells.mkString("\n"))
+      if (pidMalDoc.nonEmpty)
+        report.append("\n\nMalicious Documents Found:\n\n" + pidMalDoc.mkString("\n"))
+      if (pidPack.nonEmpty)
+        report.append("\n\nPackers Found:\n\n" + pidPack.mkString("\n"))
       // if(pidSuspStr.nonEmpty)""
       report.toString()
     }
@@ -262,11 +359,10 @@ object CreateReport {
     var str = ""
     val urls = yara.url
     val pidUrls = urls.filter(x => x.proc.contains(pid))
-    if(pidUrls.nonEmpty)str = "\n\nURLs Found:\n" + pidUrls.mkString("\n")
+    if(pidUrls.nonEmpty)str = "\n\nURLs Found By Yara:\n" + pidUrls.mkString("\n")
 
     return str
   } // END
-
 
   /** Check for executables disguised as other processes. */
   private[this] def findHiddenExecs(vec: Vector[ProcessBbs]): String = {
@@ -296,8 +392,8 @@ object CreateReport {
 
     /** Vector of process names. */
     val procVec: Vector[String] = vec.map(x => x.name).distinct
-    val searchForHiddenProcs = procVec.map(x => regex.findFirstIn(x).getOrElse("None"))
-    val hiddenProcs = searchForHiddenProcs.filterNot(x => x.contains("None"))
+    val searchForHiddenProcs = procVec.map(x => regex.findFirstIn(x))
+    val hiddenProcs = searchForHiddenProcs.flatten
 
     if(hiddenProcs.nonEmpty) {
       println("\nPrinting hidden executables.\n\n")
@@ -335,12 +431,13 @@ object CreateReport {
       reportStr = "\n\tDuplicate run keys are an indication that an attacker used the registry to establish persistence.\n"
       tempVec = for(values <- filterCount) yield s"\t${values._2} links to the run key were found in PID: ${values._1}"
       reportStr = reportStr + tempVec.mkString("\n")
+
       if(filterCount.exists(x => x._2 > 8)) {
         reportStr = reportStr + {
           s"\n\n\tWe have determined that an attacker used the run key to establish registry persistence.\n"
         }
-      }
-    }
+      }  // END if filterCount exists
+    } // END if filterCount.nonEmpty()
 
     reportStr
   } // END memoryLeaks()
@@ -425,7 +522,8 @@ object CreateReport {
     val yarMal = yarMalware.map(x => (x.proc, x.rule))
     val malStrVec =  for(value <- yarMal) yield value._1 + " Rule Found: " + value._2
 
-    if(yarMalware.nonEmpty) reportStr.append("\n\t" + malStrVec.mkString("\n\t"))
+    if(yarMalware.nonEmpty)
+      reportStr.append("\n\t" + malStrVec.mkString("\n\t"))
 
     val yarSuspicious: YaraSuspicious = yaraObj.suspItems
 
@@ -434,22 +532,30 @@ object CreateReport {
     val antidebug: Vector[YaraParse] = yarSuspicious.antidebug
     val antiTup = antidebug.map(x => (x.owner, x.rule))
     val antidebugVec =  for(value <- antiTup) yield value._1 + " Rule Found: " + value._2
-    if(antidebug.nonEmpty) reportStr.append("\n\tAntidebug tools:\n\t" + antidebugVec.mkString("\n\t"))
+
+    if(antidebug.nonEmpty)
+      reportStr.append("\n\tAntidebug tools:\n\t" + antidebugVec.mkString("\n\t"))
 
     val exploitKits: Vector[YaraParse] = yarSuspicious.exploitKits
     val exploitTup = antidebug.map(x => (x.owner, x.rule))
     val exploitVec =  for(value <- exploitTup) yield value._1 + " Rule Found: " + value._2
-    if(exploitKits.nonEmpty) reportStr.append("\n\tExploit Kits:\n\t" + exploitVec.mkString("\n\t"))
+
+    if(exploitKits.nonEmpty)
+      reportStr.append("\n\tExploit Kits:\n\t" + exploitVec.mkString("\n\t"))
 
     val webshells: Vector[YaraParse] = yarSuspicious.webshells
     val shellsTup = webshells.map(x => (x.owner, x.rule))
     val shellsVec =  for(value <- shellsTup) yield value._1 + " Rule Found: " + value._2
-    if(webshells.nonEmpty) reportStr.append("\n\tExploit Kits:\n\t" + shellsVec.mkString("\n\t"))
+
+    if(webshells.nonEmpty)
+      reportStr.append("\n\tExploit Kits:\n\t" + shellsVec.mkString("\n\t"))
 
     val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
     val docsTup = malDocs.map(x => (x.owner, x.rule))
     val docsVec =  for(value <- docsTup) yield "Process: " + value._1 + " Rule Found: " + value._2
-    if(malDocs.nonEmpty) reportStr.append("\n\tExploit Kits:\n\t" + docsVec.mkString("\n\t"))
+
+    if(malDocs.nonEmpty)
+      reportStr.append("\n\tExploit Kits:\n\t" + docsVec.mkString("\n\t"))
 
     return reportStr.toString
   } // END malwareFound()
