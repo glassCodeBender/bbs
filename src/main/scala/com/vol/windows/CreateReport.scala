@@ -6,6 +6,10 @@ object CreateReport {
     /** Using StringBuilder for fast concatenation of Strings. */
     val report = new StringBuilder()
 
+    /**
+      *
+      */
+
     /** Grab info we need for report. */
     // YaraParseString(rule, proc, str)
     // YaraParse(classification, rule, owner, offset)
@@ -93,6 +97,9 @@ object CreateReport {
 
 
 
+
+
+
     /** Suspicious Console Commands */
 
     if(sysSt.suspCmds.nonEmpty){
@@ -101,8 +108,16 @@ object CreateReport {
     }
 
     /** Commandline History */
+    if(sysSt.consoles.nonEmpty){
+      report.append("Commandline History Found:\n\n")
+      report.append(sysSt.consoles)
+    }
 
     /** PROCESS INFO */
+
+
+
+
 
 
   } // END run()
@@ -113,43 +128,52 @@ object CreateReport {
     * **************************************************************
     ****************************************************************/
 
-  /** Looks for hidden executables. */
-  private[this] def findHiddenExecs(vec: Vector[ProcessBbs]): Vector[String] = {
+  private[this] def processInfo() = {
 
+
+  } // END processInfo()
+
+  /** Check for executables disguised as other processes. */
+  private[this] def findHiddenExecs(vec: Vector[ProcessBbs]): String = {
+
+    var str = ""
     val hiddenExecPattern = {
-      Vector(".+//.xlsx.exe", ".+//.csv.exe", ".+//.doc.exe", ".+//.xls.exe", ".+//.xltx.exe", ".+//.xlt.exe",
-        ".+//.pdf.exe", ".+//.xlsb.exe", ".+//.xlsm.exe", ".+//.xlst.exe", ".+//.xml.exe", ".+//.txt.exe",
-        ".+//.ods.exe", ".+//.docx.exe", ".+//.dot.exe", ".+//.rtf.exe", ".+//.docm.exe", ".+//.dotm.exe",
-        ".+//.htm.exe", ".+//.mht.exe", ".+//.jpg.exe", ".+//.ppt.exe", ".+//.pptx.exe", ".+//.pot.exe",
-        ".+//.odp.exe", ".+//.ppsx.exe", ".+//.pps.exe", ".+//.pptm.exe", ".+//.potm.exe", ".+//.ppsm.exe",
-        ".+//.py.exe", ".+//.pl.exe", ".+//.eml.exe", ".+//.json.exe", ".+//.mp3.exe", ".+//.wav.exe", ".+//.aiff.exe",
-        ".+//.au.exe", ".+//.pcm.exe", ".+//.ape.exe", ".+//.wv.exe", ".+//.m4a.exe", ".+//.8svf.exe", ".+//.webm.exe",
-        ".+//.wv.exe", ".+//.wma.exe", ".+//.vox.exe", ".+//.tta.exe", ".+//.sln.exe", ".+//.raw.exe", ".+//.rm.exe",
-        ".+//.ra.exe", ".+//.opus.exe", ".+//.ogg.exe", ".+//.oga.exe", ".+//.mogg.exe", ".+//.msv.exe", ".+//.mpc.exe",
-        ".+//.mmf.exe", ".+//.m4b.exe", ".+//.ivs.exe", ".+//.ilkax.exe", ".+//.gsm.exe", ".+//.flac.exe",
-        ".+//.dvf.exe", ".+//.dss.exe", ".+//.dct.exe", ".+//.awb.exe", ".+//.amr.exe", ".+//.act.exe", ".+//.aax.exe",
-        ".+//.aa.exe", ".+//.3gp.exe", ".+//.webm.exe", ".+//.mkv.exe", ".+//.flv.exe", ".+//.vob.exe", ".+//.ogv.exe",
-        ".+//.ogg.exe", ".+//.gif.exe", ".+//.gifv.exe", ".+//.mng.exe", ".+//.avi.exe", ".+//.mov.exe", ".+//.qt.exe",
-        ".+//.wmv.exe", ".+//.yuv.exe", ".+//.rm.exe", ".+//.rmvb.exe", ".+//.asf.exe", ".+//.amv.exe", ".+//.mp4.exe",
-        ".+//.m4p.exe", ".+//.m4v.exe", ".+//.amv.exe", ".+//.asf.exe")
+      Vector("\\.xlsx.exe", "\\.csv.exe", "\\.doc.exe", "\\.xls.exe", "\\.xltx.exe", "\\.xlt.exe",
+        "\\.pdf.exe", "\\.xlsb.exe", "\\.xlsm.exe", "\\.xlst.exe", "\\.xml.exe", "\\.txt.exe",
+        "\\.ods.exe", "\\.docx.exe", "\\.dot.exe", "\\.rtf.exe", "\\.docm.exe", "\\.dotm.exe",
+        "\\.htm.exe", "\\.mht.exe", "\\.jpg.exe", "\\.ppt.exe", "\\.pptx.exe", "\\.pot.exe",
+        "\\.odp.exe", "\\.ppsx.exe", "\\.pps.exe", "\\.pptm.exe", "\\.potm.exe", "\\.ppsm.exe",
+        "\\.py.exe", "\\.pl.exe", "\\.eml.exe", "\\.json.exe", "\\.mp3.exe", "\\.wav.exe", "\\.aiff.exe",
+        "\\.au.exe", "\\.pcm.exe", "\\.ape.exe", "\\.wv.exe", "\\.m4a.exe", "\\.8svf.exe", "\\.webm.exe",
+        "\\.wv.exe", "\\.wma.exe", "\\.vox.exe", "\\.tta.exe", "\\.sln.exe", "\\.raw.exe", "\\.rm.exe",
+        "\\.ra.exe", "\\.opus.exe", "\\.ogg.exe", "\\.oga.exe", "\\.mogg.exe", "\\.msv.exe", "\\.mpc.exe",
+        "\\.mmf.exe", "\\.m4b.exe", "\\.ivs.exe", "\\.ilkax.exe", "\\.gsm.exe", "\\.flac.exe",
+        "\\.dvf.exe", "\\.dss.exe", "\\.dct.exe", "\\.awb.exe", "\\.amr.exe", "\\.act.exe", "\\.aax.exe",
+        "\\.aa.exe", "\\.3gp.exe", "\\.webm.exe", "\\.mkv.exe", "\\.flv.exe", "\\.vob.exe", "\\.ogv.exe",
+        "\\.ogg.exe", "\\.gif.exe", "\\.gifv.exe", "\\.mng.exe", "\\.avi.exe", "\\.mov.exe", "\\.qt.exe",
+        "\\.wmv.exe", "\\.yuv.exe", "\\.rm.exe", "\\.rmvb.exe", "\\.asf.exe", "\\.amv.exe", "\\.mp4.exe",
+        "\\.m4p.exe", "\\.m4v.exe", "\\.amv.exe", "\\.asf.exe")
     } // END hiddenExecPattern
 
     /** Combine all the strings in the Vector to make a single regex */
-    val makeRegex = "(" + hiddenExecPattern.mkString("|") + ")"
+    val makeRegex = ".+(" + hiddenExecPattern.mkString("|") + ")"
     val regex = makeRegex.r
 
     /** Vector of process names. */
     val procVec: Vector[String] = vec.map(x => x.name).distinct
     val searchForHiddenProcs = procVec.map(x => regex.findFirstIn(x).getOrElse("None"))
     val hiddenProcs = searchForHiddenProcs.filterNot(x => x.contains("None"))
+    
     if(hiddenProcs.nonEmpty) {
       println("\nPrinting hidden executables.\n\n")
       hiddenProcs.foreach(println)
-    }
-
-    return hiddenProcs
+      str = str + "The following hidden processes were found:\n\t" + hiddenProcs.mkString("\n\t")
+    } // END if nonEmpty
+    
+    return str
   } // END hiddenExecPattern
 
+  /** Check for meterpreter DLL */
   private[this] def checkMeterpreter(vec: Vector[LdrInfo]) = {
     var str = ""
     val meter = vec.map(x => (x.pid, x.meterpreter))
