@@ -183,8 +183,8 @@ object VolDiscoveryWindows extends VolParse {
    // val suspiciousSIDs: mutable.Map[String, String] = DetectLateralMovement.run(memFile, os)
 
    val shimCache = shimCacheEntries(memFile, os, kdbg)
-   val sysRegistry = Vector.empty
-    val userRegistry = Vector.empty
+   var sysRegistry = Vector.empty
+    var userRegistry = Vector.empty
 
     if(os.contains("WinXp") || os.contains("Win2003")){
       sysRegistry ++: sysRegistryCheckXP(memFile, os, kdbg)
@@ -211,7 +211,6 @@ object VolDiscoveryWindows extends VolParse {
     // extractEVT(memFile, os, dump)
     println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...")
     val mftFilename = extractMFT(memFile, os, kdbg, dump)
-
 
     println("\n\nAnalyzing Windows services and gathering information about system state...\n")
     val sysState: SysState = SysStateScan.run(memFile, os, kdbg)
@@ -303,7 +302,7 @@ object VolDiscoveryWindows extends VolParse {
     if (os.startsWith("WinXP") || os.startsWith("Win2003")) {
       // saved result is pipe separated txt file with Date/Time|Log Name| Computer Name|SID|Source|EventID|Event Type|Message
       if (kdbg.nonEmpty) {
-        Try(s"python vol.py -f $memFile --profile=$os evtlogs -v --save-evt -D $dump".!).getOrElse("")
+        Try(s"python vol.py --conf-file=user_config.txt evtlogs -v --save-evt -D $dump".!).getOrElse("")
       } else {
         Try(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $dump".!).getOrElse("")
       }
@@ -367,11 +366,11 @@ object VolDiscoveryWindows extends VolParse {
     var service = ""
 
     if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py --conf-file=user_config.txt -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py --conf-file=user_config.txt -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py --conf-file=user_config.txt $kdbg -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py --conf-file=user_config.txt -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py --conf-file=user_config.txt -K $key4".!!.trim ).getOrElse("")
+      runOnce = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py --conf-file=user_config.txt printkey -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py --conf-file=user_config.txt $kdbg printkey -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key4".!!.trim ).getOrElse("")
     } else{
       runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
       explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
@@ -404,11 +403,11 @@ object VolDiscoveryWindows extends VolParse {
 
     /** The variable names here are wrong, but I don't want to deal w/ it. */
     if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py --conf-file=user_config.txt -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py --conf-file=user_config.txt -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py --conf-file=user_config.txt -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py --conf-file=user_config.txt -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py --conf-file=user_config.txt -K $key4".!!.trim ).getOrElse("")
+      runOnce = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py --conf-file=user_config.txt printkey -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key4".!!.trim ).getOrElse("")
     } else{
       runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
       explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
@@ -943,19 +942,13 @@ object NetScan extends VolParse with SearchRange {
       .dropWhile(!_.contains("Offset"))
       .dropWhile(_.contains("Offset"))
       .toVector
-    
-    val net2d: Vector[Vector[String]] = vecParse(netParsed).getOrElse(Vector[Vector[String]]())
 
-    println("Printing net2d")
-    for{
-      line <- net2d
-      value <- line
-    } println(value)
+    val net2d: Vector[Vector[String]] = vecParse(netParsed).getOrElse(Vector[Vector[String]]())
 
     val includesListening = for{
       value <- net2d
       if value(4) != "LISTENING" || value(4) != "CLOSED" || value(4) != "ESTABLISHED"
-    } yield Vector(value(0).trim, value(1).trim, value(2).trim, value(3).trim, "NOINFO", value(4).trim, value(5).trim,
+    } yield Vector(value(0).trim, value(1).trim, value(2).trim, value(3).trim, "NOINFO", value(5).trim, value(5).trim,
       Try(value(6)).getOrElse("") + " " + Try(value(7)).getOrElse("") + " " + Try(value(8)).getOrElse(""))
 
     val discludesListening = for{
@@ -966,30 +959,27 @@ object NetScan extends VolParse with SearchRange {
 
     val allListening = includesListening ++: discludesListening
 
-    println("Print allListening\n")
-    for{
-      line <- allListening
-      value <- line
-    } print(value)
-
     val connects = for {
       line <- allListening
       if {!line(2).startsWith("198") || !line(2).startsWith("10\\.") || !line(2).startsWith("172") &
         line(3).startsWith("198") || line(3).startsWith("10\\.") || line(3).startsWith("172")}
-    } yield new NetConnections(line(5), line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, false )
+    } yield new NetConnections(getPid(line(4)) + getPid(line(5)) + getPid(line(6)),
+      line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, false )
     // parse
     val connects2 = for {
       line <- allListening
       if {line(2).startsWith("198") || line(2).startsWith("10\\.") || line(2).startsWith("172\\.") &
         !line(3).startsWith("198") || !line(3).startsWith("10\\.") || !line(3).startsWith("172\\.")}
-    } yield new NetConnections(line(5), line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", false, true )
+    } yield new NetConnections(getPid(line(4)) + getPid(line(5)) + getPid(line(6)),
+      line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", false, true )
     // parse
 
     val connects3 = for{
       line <- allListening
       if {line(3).startsWith("198") || line(3).startsWith("10\\.") || line(3).startsWith("172\\.") &
         line(2).startsWith("198") || line(2).startsWith("10\\.") || line(2).startsWith("172\\.")}
-    } yield new NetConnections(line(5), line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, true )
+    } yield new NetConnections(getPid(line(4)) + getPid(line(5)) + getPid(line(6)),
+      line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, true )
 
     val foreignSrc = connects.map(x => x.srcIP)
       .filterNot(_.startsWith("10\\."))
@@ -1013,6 +1003,12 @@ object NetScan extends VolParse with SearchRange {
 
     (allConnects, foreignIPs)
 } // END netScan()
+
+  private[this] def getPid(str: String): String = {
+    val pidSuccess = Try(str.toInt).isSuccess
+    if(pidSuccess) str
+    else ""
+  } // END getPid
 
   /***************************************
     * NEED TO FIX LIKE NETSCAN WAS FIXED
@@ -1059,8 +1055,12 @@ object NetScan extends VolParse with SearchRange {
   private[this] def whoisLookup(vec: Vector[String]) = {
     val ips = vec.distinct
 
-    for(connection <- ips) yield getWhoIs(connection)
+    val result = for(connection <- ips) yield getWhoIs(connection)
 
+    val cleanedResult = result.filterNot(x => x.name.contains("Failed."))
+    println("Printing whois lookup result...")
+    cleanedResult.foreach(println)
+    cleanedResult
   } // END whoisLookup()
 
   /** Look up info about ip address from whois and return information. */
@@ -1076,8 +1076,6 @@ object NetScan extends VolParse with SearchRange {
     // check if IP address is from Microsoft, Apple, a backbone network provider, or other common subnets
 
     val whoisResult = Try(whois.query()).getOrElse(PageInfo("Connection Failed.","Connection failed", "", "", "", "", "", "", "", ""))
-    println("Printing whois result... ")
-    println(whoisResult)
     /** Try to connect to whois to find information about */
     // Try(whois.connect("www.whois.arin.net")).getOrElse(println(response))
 
@@ -1213,7 +1211,7 @@ object SysStateScan extends VolParse {
     var envars = ""
     if(kdbg.nonEmpty){
       envars = {
-        Try( s"python --conf-file=user_config.txt envars --silent".!!.trim ).getOrElse("")
+        Try( s"python --conf-file=user_config.txt envars".!!.trim ).getOrElse("")
       }
     }else {
       envars = {
