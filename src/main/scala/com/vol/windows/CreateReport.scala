@@ -42,60 +42,59 @@ object CreateReport extends FileFun {
     val promiscModeMap: Map[String, Boolean] = process.promiscMode
 
     /** Write Report */
-    val intro = s"Big Brain Security Volatile IDS Report for $memFile\n\nSummary:\n\n\tRisk Rating: $riskRating\n\n"
-    report.append(intro + "\tMalware Found: \n\n")
+    val intro = s"Big Brain Security Volatile IDS Report FOR $memFile\n\nSUMMARY:\n\nRISK RATING: $riskRating\n\n"
 
     /** Yara malware findings */
     val malware: String = malwareFound(yaraObj)
 
     if(malware.nonEmpty)
-      report.append("\tMalware Found: None")
+      report.append("Malware Found:\n\n")
 
     report.append(malware)
-    report.append("Significant Findings:\n\n")
+    report.append("SIGNIFICANT FINDINGS:\n\n")
 
-    /**\tDisabled Services */
+    /**Disabled Services */
     if(svc.nonEmpty)
-      report.append("\tThe following suspicious services were disabled.\n\t" + svc.mkString("\n\t"))
+      report.append("THE FOLLOWING SUSPICIOUS SERVICES WERE DISABLED.\n" + svc.mkString("\n"))
 
-    /**\tRemote Mapped Drives */
+    /**Remote Mapped Drives */
     val mappedDriveVec = mappedDrives(remoteMapped)
     if(mappedDriveVec.nonEmpty){
-      report.append("\n\tThe following remote mapped drives were found:\n\t" + mappedDriveVec.mkString("\n\t"))
+      report.append("\nThe following remote mapped drives were found:\n" + mappedDriveVec.mkString("\n"))
     }
 
-    /** \tUnlinked DLLs*/
+    /** Unlinked DLLs*/
     val ldrInfoCheck = ldrCheck(ldr)
 
     report.append(ldrInfoCheck)
 
-    /**\tRootkits Found */
+    /**Rootkits Found */
     val rootkitInfo = rootkitCheck(rootkit)
 
     report.append(rootkitInfo)
 
-    /** \tPromiscuous Mode*/
+    /** Promiscuous Mode*/
     if(promiscModeMap.nonEmpty) {
-      report.append("\n\tThe system was put into promiscuous mode by the following pid(s): " + promiscModeMap.keys.mkString(", "))
+      report.append("\nThe system was put into promiscuous mode by the following pid(s): " + promiscModeMap.keys.mkString(", "))
     }
 
-    /** \tHidden Processes*/
+    /** Hidden Processes*/
     val hiddenStr: String = hiddenProcs(proc)
     if(hiddenStr.nonEmpty){
-      report.append("\n\tThe following hidden processes were found:\n\t" + hiddenStr)
-      report.append("\n\tNOTE: If the processes, is not used by anti-virus software, you have malware.")
+      report.append("\nThe following hidden processes were found:\n" + hiddenStr)
+      report.append("\nNOTE: If the processes, is not used by anti-virus software, you have malware.")
     }
 
     /** Whether or not VNC is on the system. */
     val vnc = vncCheck(net)
     if(vnc.nonEmpty) report.append(vnc)
 
-    /** \tMeterpreter DLL */
+    /** Meterpreter DLL */
     val meterpreter = checkMeterpreter(ldr)
     if(meterpreter.nonEmpty)
       report.append(meterpreter)
 
-    /** \tMemory Leaks*/
+    /** Memory Leaks*/
     val leaks = memoryLeaks(regPersist)
     if(leaks.nonEmpty)
       report.append(leaks)
@@ -107,8 +106,8 @@ object CreateReport extends FileFun {
 
     /** Suspicious Console Commands */
     if(sysSt.suspCmds.nonEmpty){
-      report.append("\n\tThe following potentially suspicious exams were found in the commandline info: \n\t")
-      report.append(sysSt.suspCmds.mkString("\n\t"))
+      report.append("\nThe following potentially suspicious exams were found in the commandline info: \n")
+      report.append(sysSt.suspCmds.mkString("\n"))
     }
 
     /** Commandline History */
@@ -183,7 +182,6 @@ object CreateReport extends FileFun {
 
     if(proc.hidden)
       report.append("\nHidden: True")
-
     /** Check if metepreter dll was found in process or in parent. */
     val ldrPid = ldr.filter(x => x.pid.contains(proc.pid))
     val ldrPpid = ldr.filter(x => x.pid.contains(proc.ppid))
@@ -196,9 +194,8 @@ object CreateReport extends FileFun {
     if(ldrPpid.nonEmpty){
       val ldr = ldrPpid.head
       if(ldr.meterpreter)
-        report.append(s"\nMeterpreter DLL Found in Parent Process $ppidName: True!!!!!!")
+        report.append(s"\nMETERPRETER DLL FOUND IN PARENT PROCESS $ppidName: True!!!!!!")
     }
-
     /** Add Dll command found */
     val dll: Vector[DllInfo] = procBrain.dllInfo
     val dllPerPid = dll.filter(x => x.pid.contains(proc.pid))
@@ -208,15 +205,14 @@ object CreateReport extends FileFun {
       dllCommand =  dllPerPid.head.command
     if(dllCommand.nonEmpty)
       report.append("\nCommandline Info: " + dllCommand)
-
     /** Check yara for malicious signatures found  */
     val checkYaraPid = checkYaraPerProcess(proc.pid, yara)
     val checkYaraPpid = checkYaraPerProcess(proc.ppid, yara)
 
     if(checkYaraPid.nonEmpty)
-      report.append("\nMalicious Signatures Found in Process:" + checkYaraPid)
+      report.append("\nMALICIOUS SIGNATURES FOUND IN PROCESS:" + checkYaraPid)
     if(checkYaraPpid.nonEmpty)
-      report.append("\nMalicious Signatures Found in Parent Process:" + checkYaraPpid)
+      report.append("\nMALICIOUS SIGNATURES FOUND IN PARENT PROCESS:" + checkYaraPpid)
 
     // val remoteMapped = disc.remoteMapped
 
@@ -231,23 +227,23 @@ object CreateReport extends FileFun {
       val pidResult = persistMap.getOrElse(proc.pid, Some("0"))
       val ppidResult = persistMap.getOrElse(proc.ppid, Some("0"))
       if (pidResult.getOrElse("0") != "0") {
-          report.append("\n\nRegistry Persistence Info For Current Process: " + ppidPersistence.head)
+          report.append("\n\nREGISTRY PERSISTENCE INFO FOR CURRENT PROCESS: " + ppidPersistence.head)
         } // END if registry persistence exists
       if (ppidResult.getOrElse("0") != "0") {
-          report.append(s"\n\nRegistry Persistence Info For Parent Process $ppidName PID ${proc.ppid}: " + ppidPersistence.head)
+          report.append(s"\n\nREGISTRY PERSISTENCE INFO FOR PARENT PROCESS $ppidName PID ${proc.ppid}: " + ppidPersistence.head)
       } // END if persistMap exists
     } // END persistenceMap.nonEmpty
 
     /** Add information about privileges */
     val privs = procBrain.privs
-    val priv = privs.filter(x => x.pid.contains(proc.pid))
+    val priv: Vector[Privileges] = privs.filter(x => x.pid.contains(proc.pid))
 
     if(priv.nonEmpty) {
       val privResult = priv.head
 
       if(privResult.debugPriv){
-        report.append("\nDebug Privilege was explicitly enabled. Attackers commonly do this.\n\n")
-        report.append("Suspicious Privileges:\n" + priv.head.suspiciousPrivs.mkString("\n"))
+        report.append("\nDEBUG PRIVILEGE WAS EXPLICITLY ENABLED. ATTACKERS COMMONLY DO THIS.\n\n")
+        report.append("SUSPICIOUS PRIVILEGES:\n" + privResult.suspiciousPrivs.mkString("\n"))
       }
 
       if(privResult.enabledPrivs.nonEmpty) {
@@ -265,8 +261,12 @@ object CreateReport extends FileFun {
 
     /** Add information about outside ip addresses */
     val connections = netActivity(disc.net._1, proc.pid)
-    if(connections.nonEmpty) report.append(connections)
+    if(connections.nonEmpty)
+      report.append(connections)
 
+    /**
+      * MAP!!
+      */
     /** Malfind Results */
     val malfind = procBrain.malfind.getOrElse(proc.pid, "")
     val ppidMalfind = procBrain.malfind.getOrElse(proc.ppid, "")
@@ -278,7 +278,8 @@ object CreateReport extends FileFun {
 
     val urls = checkYaraLessImportant(yara, proc.pid)
 
-    if(urls.nonEmpty) report.append(urls)
+    if(urls.nonEmpty)
+      report.append(urls)
 
     report.append("\n*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*\n\n")
 
@@ -287,9 +288,9 @@ object CreateReport extends FileFun {
 
   private[this] def netActivity(vec: Vector[NetConnections], pid: String): String = {
     var str = ""
-    val pids = vec.filter(x => x.pid.contains(pid))
-    val srcIps = pids.map(x => x.srcIP)
-    val destIps = pids.map(x => x.destIP)
+    val pids: Vector[NetConnections] = vec.filter(x => x.pid.contains(pid))
+    val srcIps: Vector[String] = pids.map(x => x.srcIP)
+    val destIps: Vector[String] = pids.map(x => x.destIP)
     /** Removing local ip addresses */
     val srcFiltered = {
       srcIps.filterNot(_.startsWith("192\\.")).filterNot(_.startsWith("172\\.")).filterNot(_.startsWith("10\\."))
@@ -336,7 +337,7 @@ object CreateReport extends FileFun {
 
       /** Append to StringBuilder if found */
       if (pidMal.nonEmpty)
-        report.append("\n\nMalware Signatures Found:\n\n" + pidMal.mkString("\n"))
+        report.append("\n\nMALWARE SIGNATURES FOUND:\n\n" + pidMal.mkString("\n"))
       if (pidAnti.nonEmpty)
         report.append("\n\nAntidebug Signatures Found:\n\n" + pidAnti.mkString("\n"))
       if (pidCVE.nonEmpty)
@@ -359,7 +360,8 @@ object CreateReport extends FileFun {
     var str = ""
     val urls = yara.url
     val pidUrls = urls.filter(x => x.proc.contains(pid))
-    if(pidUrls.nonEmpty)str = "\n\nURLs Found By Yara:\n" + pidUrls.mkString("\n")
+    if(pidUrls.nonEmpty)
+      str = "\n\nURLs Found By Yara:\n" + pidUrls.mkString("\n")
 
     return str
   } // END
@@ -396,11 +398,10 @@ object CreateReport extends FileFun {
     val hiddenProcs = searchForHiddenProcs.flatten
 
     if(hiddenProcs.nonEmpty) {
-      println("\nPrinting hidden executables.\n\n")
       hiddenProcs.foreach(println)
-      str = str + "\n\tThe following hidden processes were found:\n\t" + hiddenProcs.mkString("\n\t")
+      str = str + "\nThe following hidden processes were found:\n" + hiddenProcs.mkString("\n")
     } // END if nonEmpty
-    
+
     return str
   } // END hiddenExecPattern
 
@@ -408,10 +409,10 @@ object CreateReport extends FileFun {
   private[this] def checkMeterpreter(vec: Vector[LdrInfo]) = {
     var str = ""
     val meter = vec.map(x => (x.pid, x.meterpreter))
-    val meterFound = meter.filter(x => x._2 == true)
+    val meterFound = meter.filter(_._2 == true)
     if(meterFound.nonEmpty) {
-      str = "\n\tA DLL used by meterpreter was found on the system indicating that the system was breached."
-      val dllFound = for(value <- meterFound) yield s"\n\tA meterpreter DLL was found in PID: ${value._1}"
+      str = "\nA DLL used by meterpreter was found on the system indicating that the system was breached."
+      val dllFound = for(value <- meterFound) yield s"\nA meterpreter DLL was found in PID: ${value._1}"
       str = str + dllFound.mkString("\n")
     }
 
@@ -428,13 +429,13 @@ object CreateReport extends FileFun {
 
     var tempVec = Vector[String]()
     if (filterCount.nonEmpty){
-      reportStr = "\n\tDuplicate run keys are an indication that an attacker used the registry to establish persistence.\n"
-      tempVec = for(values <- filterCount) yield s"\t${values._2} links to the run key were found in PID: ${values._1}"
+      reportStr = "\nDuplicate run keys are an indication that an attacker used the registry to establish persistence.\n"
+      tempVec = for(values <- filterCount) yield s"${values._2} links to the run key were found in PID: ${values._1}"
       reportStr = reportStr + tempVec.mkString("\n")
 
       if(filterCount.exists(x => x._2 > 8)) {
         reportStr = reportStr + {
-          s"\n\n\tWe have determined that an attacker used the run key to establish registry persistence.\n"
+          s"\n\nWe have determined that an attacker used the run key to establish registry persistence.\n"
         }
       }  // END if filterCount exists
     } // END if filterCount.nonEmpty()
@@ -450,9 +451,10 @@ object CreateReport extends FileFun {
     } yield "Source IP: " + value.srcIP +"Destination IP:" + value.destIP
 
     if(vncCheck.nonEmpty){
-      str = "\n\tVNC was found on the system. This is remote desktop software commonly used for malicious and non-malicious reasons.\n\t" +
-      vncCheck.mkString("\n\t")
+      str = "\nVNC was found on the system. This is remote desktop software commonly used for malicious and non-malicious reasons.\n" +
+      vncCheck.mkString("\n")
     }
+
     return str
   } // END vncCheck()
 
@@ -462,7 +464,7 @@ object CreateReport extends FileFun {
       if value.hidden == true
     } yield "PID: " + value.pid + "Name: " + value.name
 
-    val str = hidden.mkString("\n\t")
+    val str = hidden.mkString("\n")
 
     return str
   } // END hiddenProcs()
@@ -472,36 +474,36 @@ object CreateReport extends FileFun {
     val callbacks = root.callbacks        // done
     val hiddenMods = root.hiddenModules   // done
     val orphan: String = root.orpanThread // done
-    val timers = root.timers              // done
+    val timers: Vector[String] = root.timers              // done
     val ssdt = root.ssdtFound // done
 
-    if(ssdt) str.append("\n\tAn inline hook rootkit was found. See ssdt scan for more information.\n\t")
+    if(ssdt) str.append("\nAn inline hook rootkit was found. See ssdt scan for more information.\n")
     if(callbacks._1.nonEmpty){
-      str.append("\n\tCallbacks were found on the system indicative of a rootkit\n\t" )
-      str.append("Here are the results we found:\n\t" + callbacks._1.mkString("\n\t"))
+      str.append("\nCallbacks were found on the system indicative of a rootkit\n" )
+      str.append("Here are the results we found:\n" + callbacks._1.mkString("\n"))
     }
     if(callbacks._2.nonEmpty){
-      str.append("\n\tThe following calls to APIs commonly used by rootkits were found:\n\t")
-      str.append(callbacks._2.mkString("\n\t"))
+      str.append("\nThe following calls to APIs commonly used by rootkits were found:\n")
+      str.append(callbacks._2.mkString("\n"))
     }
     if(orphan.nonEmpty){
-      str.append("\n\tThe following orphan threads were found that may be indicative of a rootkit:\n\t" + orphan)
+      str.append("\nThe following orphan threads were found that may be indicative of a rootkit:\n" + orphan)
     }
     if(hiddenMods._1.nonEmpty){
-      str.append("\n\tThe following hidden kernel modules were found:\n\t" + hiddenMods._1.mkString("\n\t"))
+      str.append("\nThe following hidden kernel modules were found:\n" + hiddenMods._1.mkString("\n"))
     }
     if(timers.nonEmpty){
-      str.append("\n\tThe following kernel timers were found indicative of a rootkit:\n\t" + timers.mkString("\n\t"))
+      str.append("\nThe following kernel timers were found indicative of a rootkit:\n" + timers.mkString("\n"))
     }
 
     return str.toString()
   } // END rootkitCheck()
 
   private[this] def ldrCheck(vec: Vector[LdrInfo]): String = {
-    val unlinkedDlls = vec.map(x => x.probs)
+    val unlinkedDlls: Vector[Vector[String]] = vec.map(x => x.probs)
     var str = ""
     if(unlinkedDlls.nonEmpty) {
-      str = "\n\tThe following unlinked DLLs were found:\n\t" + unlinkedDlls.mkString("\n\t")
+      str = "\nThe following unlinked DLLs were found:\n" + unlinkedDlls.mkString("\n")
     }
 
     return str
@@ -534,28 +536,28 @@ object CreateReport extends FileFun {
     val antidebugVec =  for(value <- antiTup) yield value._1 + " Rule Found: " + value._2
 
     if(antidebug.nonEmpty)
-      reportStr.append("\n\tAntidebug tools:\n\t" + antidebugVec.mkString("\n\t"))
+      reportStr.append("\nAntidebug tools:\n" + antidebugVec.mkString("\n"))
 
     val exploitKits: Vector[YaraParse] = yarSuspicious.exploitKits
     val exploitTup = antidebug.map(x => (x.owner, x.rule))
     val exploitVec =  for(value <- exploitTup) yield value._1 + " Rule Found: " + value._2
 
     if(exploitKits.nonEmpty)
-      reportStr.append("\n\tExploit Kits:\n\t" + exploitVec.mkString("\n\t"))
+      reportStr.append("\nExploit Kits:\n" + exploitVec.mkString("\n"))
 
     val webshells: Vector[YaraParse] = yarSuspicious.webshells
     val shellsTup = webshells.map(x => (x.owner, x.rule))
     val shellsVec =  for(value <- shellsTup) yield value._1 + " Rule Found: " + value._2
 
     if(webshells.nonEmpty)
-      reportStr.append("\n\tExploit Kits:\n\t" + shellsVec.mkString("\n\t"))
+      reportStr.append("\nExploit Kits:\n" + shellsVec.mkString("\n"))
 
     val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
     val docsTup = malDocs.map(x => (x.owner, x.rule))
     val docsVec =  for(value <- docsTup) yield "Process: " + value._1 + " Rule Found: " + value._2
 
     if(malDocs.nonEmpty)
-      reportStr.append("\n\tExploit Kits:\n\t" + docsVec.mkString("\n\t"))
+      reportStr.append("\nExploit Kits:\n" + docsVec.mkString("\n"))
 
     return reportStr.toString
   } // END malwareFound()
@@ -628,11 +630,10 @@ object CreateReport extends FileFun {
       "TASKHOSTW.EXE" -> "Starts Windows services when OS starts up. For Windows 10 only.",
       "TASKHOSTEX.EXE" -> "Starts Windows services when OS starts up. For Windows 8 only.",
       "TASKHOST.EXE" -> "Starts Windows services when OS starts up. For Windows 7 only.",
-
+      "DUMPIT.EXE" -> "Used to create memory dumps",
       "SERVICES.EXE" -> "An essential process that manages the starting and stopping of services including the those in boot up and shut down. Do not terminate it.",
       "SMSS.EXE" -> " Session Manager SubSystem is a system process that is a central part of the Windows operating system.",
       "SPOOLSV.EXE" -> " Microsoft printer spooler service handles local printer processes. It’s a system file.",
-      "SVCHOST.EXE" -> " You may have more than six appearances of this process or less. It’s there multiple times to handle processes executed from DLLs. Leave it there.",
       "SYSTEM" -> " This is a file that stores information related to local hardware settings in the registry under ‘HKEY_LOCAL_MACHINE’. Kill it and kiss your PC’s stability bye bye.",
       "SYSTEM IDELE PROCESS" -> "Calculates the amount of CPU currently in use by applications. This won’t go away no matter how hard you try. Don’t try it, OK?",
       "TASKMGR.EXE" -> "Task Manager. Appears when you press Ctrl+Alt+Del.",
@@ -694,11 +695,14 @@ object ProcessDescription {
 
   private[windows] def get( processName: String ): String = {
     val firstTwo = processName.take( 2 )
+
+
     val byteInt = firstTwo.getBytes()
-      .map( x => x.toInt.toString ).foldLeft( "" )( ( x, y ) => x + y ).toInt
+      .map( x => x.toInt.toString )
+      .foldLeft( "" )( ( x, y ) => x + y ).toInt
 
     val tree: TreeMap[String, String] = matchProcess( byteInt )
-    val description = tree.getOrElse(processName, "")
+    val description = tree.getOrElse(processName, "UNKNOWN")
 
     return description
   } // get()
@@ -743,5 +747,7 @@ object ProcessDescription {
 
     return result
   } // END matchProcess()
+
+
 
 } // END CreateReport
