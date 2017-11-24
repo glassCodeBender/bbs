@@ -364,14 +364,14 @@ object CreateReport extends FileFun {
       val malware = yara.malware
 
       /** Find the entries included in the processes */
-      val pidMal = malware.filter(x => x.proc.contains(pid))
-      // val pidSuspStr = susStr.filter(x => x.proc.contains(pid))
-      val pidMalDoc = malDoc.filter(x => x.owner.contains(pid))
-      val pidShells = shells.filter(x => x.owner.contains(pid))
-      val pidAnti = antidebug.filter(x => x.owner.contains(pid))
-      val pidCVE = cve.filter(x => x.owner.contains(pid))
-      val pidPack = pack.filter(x => x.owner.contains(pid))
-      val pidExploit = exploitkits.filter(x => x.owner.contains(pid))
+      val pidMal = malware.filter(x => x.proc.contains(pid)).distinct
+      // val pidSuspStr = susStr.filter(x => x.proc.contains(pid)).distinct
+      val pidMalDoc = malDoc.filter(x => x.owner.contains(pid)).distinct
+      val pidShells = shells.filter(x => x.owner.contains(pid)).distinct
+      val pidAnti = antidebug.filter(x => x.owner.contains(pid)).distinct
+      val pidCVE = cve.filter(x => x.owner.contains(pid)).distinct
+      val pidPack = pack.filter(x => x.owner.contains(pid)).distinct
+      val pidExploit = exploitkits.filter(x => x.owner.contains(pid)).distinct
 
       /** Append to StringBuilder if found */
       if (pidMal.nonEmpty)
@@ -560,7 +560,7 @@ object CreateReport extends FileFun {
     val reportStr = new StringBuilder()
     /** Grab significant yara scan findings */
     val yarMalware: Vector[YaraParseString] = yaraObj.malware
-    val yarMal = yarMalware.map(x => (x.proc, x.rule))
+    val yarMal = yarMalware.map(x => (x.proc, x.rule)).distinct
     val malStrVec =  for(value <- yarMal) yield value._1 + " Rule Found: " + value._2
 
     if(yarMalware.nonEmpty)
@@ -571,28 +571,28 @@ object CreateReport extends FileFun {
     /** Malware results. */
 
     val antidebug: Vector[YaraParse] = yarSuspicious.antidebug
-    val antiTup = antidebug.map(x => (x.owner, x.rule))
+    val antiTup = antidebug.map(x => (x.owner, x.rule)).distinct
     val antidebugVec =  for(value <- antiTup) yield value._1 + " Rule Found: " + value._2
 
     if(antidebug.nonEmpty)
       reportStr.append("\nAntidebug tools:\n" + antidebugVec.mkString("\n"))
 
     val exploitKits: Vector[YaraParse] = yarSuspicious.exploitKits
-    val exploitTup = antidebug.map(x => (x.owner, x.rule))
+    val exploitTup = antidebug.map(x => (x.owner, x.rule)).distinct
     val exploitVec =  for(value <- exploitTup) yield value._1 + " Rule Found: " + value._2
 
     if(exploitKits.nonEmpty)
       reportStr.append("\nExploit Kits:\n" + exploitVec.mkString("\n"))
 
     val webshells: Vector[YaraParse] = yarSuspicious.webshells
-    val shellsTup = webshells.map(x => (x.owner, x.rule))
+    val shellsTup = webshells.map(x => (x.owner, x.rule)).distinct
     val shellsVec =  for(value <- shellsTup) yield value._1 + " Rule Found: " + value._2
 
     if(webshells.nonEmpty)
       reportStr.append("\nExploit Kits:\n" + shellsVec.mkString("\n"))
 
     val malDocs: Vector[YaraParse] = yarSuspicious.malDocs
-    val docsTup = malDocs.map(x => (x.owner, x.rule))
+    val docsTup = malDocs.map(x => (x.owner, x.rule)).distinct
     val docsVec =  for(value <- docsTup) yield "Process: " + value._1 + " Rule Found: " + value._2
 
     if(malDocs.nonEmpty)
