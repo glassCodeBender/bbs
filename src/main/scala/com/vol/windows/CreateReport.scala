@@ -1,9 +1,13 @@
 package com.bbs.vol.windows
 
+import java.text.SimpleDateFormat
+import java.util.Calendar
+
 import com.bbs.vol.processtree._
 import com.bbs.vol.utils.FileFun
 
 import scala.collection.immutable.TreeMap
+import scala.util.Try
 
 object CreateReport extends FileFun {
 
@@ -11,6 +15,9 @@ object CreateReport extends FileFun {
     /** Using StringBuilder for fast concatenation of Strings. */
     val report = new StringBuilder()
 
+    val intDate = Calendar.getInstance().getTime
+    val dateFormat = new SimpleDateFormat("EEE, d MMM yyyy")
+    val date = dateFormat.format(intDate)
     /**
       *
       */
@@ -24,7 +31,7 @@ object CreateReport extends FileFun {
     /** (pid -> Remote Mapped Drive) */
     val remoteMapped: Vector[(String, String)] = disc.remoteMapped
     /** Vector[String], Vector[String] */
-    val registry = disc.registry
+    // val registry = disc.registry
     /** svcStopped, suspCmds */
     val sysSt: SysState = disc.sysState
     val svc = sysSt.svcStopped
@@ -42,7 +49,7 @@ object CreateReport extends FileFun {
     val promiscModeMap: Map[String, Boolean] = process.promiscMode
 
     /** Write Report */
-    val intro = s"Big Brain Security Volatile IDS Report FOR $memFile\n\nSUMMARY:\n\nRISK RATING: $riskRating\n\n"
+    val intro = s"Big Brain Security Volatile IDS Report FOR $memFile $date\n\nSUMMARY:\n\nRISK RATING: $riskRating\n\n"
 
     /** Yara malware findings */
     val malware: String = malwareFound(yaraObj)
@@ -55,12 +62,12 @@ object CreateReport extends FileFun {
 
     /**Disabled Services */
     if(svc.nonEmpty)
-      report.append("THE FOLLOWING SUSPICIOUS SERVICES WERE DISABLED.\n" + svc.mkString("\n"))
+      report.append("THE FOLLOWING SUSPICIOUS SERVICES WERE DISABLED:\n\n" + svc.mkString("\n\n"))
 
     /**Remote Mapped Drives */
     val mappedDriveVec = mappedDrives(remoteMapped)
     if(mappedDriveVec.nonEmpty){
-      report.append("\nThe following remote mapped drives were found:\n" + mappedDriveVec.mkString("\n"))
+      report.append("\nTHE FOLLOWING REMOTE MAPPED DRIVES WERE FOUND:\n" + mappedDriveVec.mkString("\n"))
     }
 
     /** Unlinked DLLs*/
@@ -75,14 +82,15 @@ object CreateReport extends FileFun {
 
     /** Promiscuous Mode*/
     if(promiscModeMap.nonEmpty) {
-      report.append("\nThe system was put into promiscuous mode by the following pid(s): " + promiscModeMap.keys.mkString(", "))
+      report.append("\nTHE SYSTEM WAS PUT INTO PROMISCUOUS MODE BY THE FOLlOWING PID(S): " + promiscModeMap.keys.mkString(", "))
     }
 
     /** Hidden Processes*/
     val hiddenStr: String = hiddenProcs(proc)
     if(hiddenStr.nonEmpty){
-      report.append("\nThe following hidden processes were found:\n" + hiddenStr)
-      report.append("\nNOTE: If the processes, is not used by anti-virus software, you have malware.")
+      report.append("\nTHE FOLLOWING HIDDEN PROCESSES WERE FOUND:\n\nNOTE: " +
+        "If the processes, is not used by anti-virus software, you probably have malware.\n\n"
+        + hiddenStr)
     }
 
     /** Whether or not VNC is on the system. */
@@ -106,20 +114,20 @@ object CreateReport extends FileFun {
 
     /** Suspicious Console Commands */
     if(sysSt.suspCmds.nonEmpty){
-      report.append("\nThe following potentially suspicious exams were found in the commandline info: \n")
+      report.append("\n\nTHE FOLLOWING POTENTIALLY SUSPICIOUS EXAMS WERE FOUND IN THE COMMANDLINE INFO: \n\n")
       report.append(sysSt.suspCmds.mkString("\n"))
     }
 
     /** Commandline History */
     if(sysSt.consoles.nonEmpty){
-      report.append("Commandline History Found:\n\n")
+      report.append("COMMANDLINE HISTORY FOUND:\n\n")
       report.append(sysSt.consoles)
     }
 
     /** PROCESS INFO */
 
     val procTree = disc.proc._2
-    report.append("\nProcess Tree Results:\n\n" + procTree )
+    report.append("\nPROCESS TREE RESULTS:\n\n" + procTree )
 
     val processInfo = writeProcessInfo(process, disc, yaraObj)
 
@@ -144,7 +152,7 @@ object CreateReport extends FileFun {
     val net = disc.net._1
 
     val disclaimer = "NOTE: PROCESS NAMES CAN BE CHANGED!! Process descriptions are provided to give the investigator" +
-      "context into what they are examining. Malicious code can be injected into a process. Do not assume that " +
+      " context into what they are examining. Malicious code can be injected into a process. Do not assume that " +
       "the description of a process is authoritative.\n\n"
 
     val processStr = for(value <- vec) yield writeEachProcess(value, yara, ldr, net, procBrain, disc)
@@ -166,11 +174,9 @@ object CreateReport extends FileFun {
     if(description.isEmpty)
       description = ProcessDescription.get(proc.name.toUpperCase)
 
-    val ppidVec = procInfo.filter(x => x.ppid.contains(proc.pid))
-    var ppidName = ""
+    val ppidVec = procInfo.filter(x => x.pid.contains(proc.ppid))
 
-    if(ppidVec.nonEmpty)
-      ppidName = ppidVec.head.ppid
+    val ppidName = if(ppidVec.nonEmpty) ppidVec.head.name else ""
 
     report.append("Name: " + proc.name + "  PID: " + proc.pid )
 
@@ -189,12 +195,12 @@ object CreateReport extends FileFun {
     if(ldrPid.nonEmpty){
       val ldr = ldrPid.head
       if(ldr.meterpreter)
-        report.append("\nMeterpreter DLL Found: True!!!!!!")
+        report.append("\n\nMeterpreter DLL Found: True!!!!!!")
     }
     if(ldrPpid.nonEmpty){
       val ldr = ldrPpid.head
       if(ldr.meterpreter)
-        report.append(s"\nMETERPRETER DLL FOUND IN PARENT PROCESS $ppidName: True!!!!!!")
+        report.append(s"\n\nMETERPRETER DLL FOUND IN PARENT PROCESS $ppidName: True!!!!!!")
     }
     /** Add Dll command found */
     val dll: Vector[DllInfo] = procBrain.dllInfo
@@ -204,15 +210,15 @@ object CreateReport extends FileFun {
     if(dllPerPid.nonEmpty)
       dllCommand =  dllPerPid.head.command
     if(dllCommand.nonEmpty)
-      report.append("\nCommandline Info: " + dllCommand)
+      report.append("\n" + dllCommand)
     /** Check yara for malicious signatures found  */
     val checkYaraPid = checkYaraPerProcess(proc.pid, yara)
     val checkYaraPpid = checkYaraPerProcess(proc.ppid, yara)
 
     if(checkYaraPid.nonEmpty)
-      report.append("\nMALICIOUS SIGNATURES FOUND IN PROCESS:" + checkYaraPid)
+      report.append("\n\nMALICIOUS SIGNATURES FOUND IN PROCESS:" + checkYaraPid)
     if(checkYaraPpid.nonEmpty)
-      report.append("\nMALICIOUS SIGNATURES FOUND IN PARENT PROCESS:" + checkYaraPpid)
+      report.append("\n\nMALICIOUS SIGNATURES FOUND IN PARENT PROCESS:" + checkYaraPpid)
 
     // val remoteMapped = disc.remoteMapped
 
@@ -242,15 +248,14 @@ object CreateReport extends FileFun {
       val privResult = priv.head
 
       if(privResult.debugPriv){
-        report.append("\nDEBUG PRIVILEGE WAS EXPLICITLY ENABLED. ATTACKERS COMMONLY DO THIS.\n\n")
-        report.append("SUSPICIOUS PRIVILEGES:\n" + privResult.suspiciousPrivs.mkString("\n"))
+        report.append("\n\nDEBUG PRIVILEGE WAS EXPLICITLY ENABLED. ATTACKERS COMMONLY DO THIS.\n\n")
+        report.append("\n\nSUSPICIOUS PRIVILEGES:\n" + privResult.suspiciousPrivs.mkString("\n"))
       }
 
       if(privResult.enabledPrivs.nonEmpty) {
-        report.append("The following privileges were explicitly enabled:\n" +
+        report.append("\n\nTHE FOLLOWING PRIVILEGES WERE EXPLICITLY ENABLED:\n" +
           privResult.enabledPrivs.mkString("\n"))
       }
-
     } // END priv nonEmpty
 
     /** Networking capability */
@@ -272,19 +277,46 @@ object CreateReport extends FileFun {
     val ppidMalfind = procBrain.malfind.getOrElse(proc.ppid, "")
 
     if(malfind.nonEmpty)
-      report.append("\nMalfind found the following results for " + proc.name + s"\n\n$malfind")
+      report.append("\nMALFIND FOUND THE FOLLOWING RESULTS FOR " + proc.name + s"\n\n$malfind")
     if(ppidMalfind.nonEmpty)
-      report.append(s"\nMalfind found the following results for the parent of ${proc.name}: $ppidName PID ${proc.ppid}\n\n$ppidMalfind")
+      report.append(s"\nMALFIND FOUND THE FOLLOWING RESULTS FOR THE PARENT OF ${proc.name}: $ppidName PID ${proc.ppid}\n\n$ppidMalfind")
+
+    val dlls: String = getDlls(dllPerPid.headOption)
+    if(dlls.nonEmpty)
+      report.append(s"\n\n${proc.name} DLL INFO:" + dlls)
 
     val urls = checkYaraLessImportant(yara, proc.pid)
+
 
     if(urls.nonEmpty)
       report.append(urls)
 
-    report.append("\n*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*\n\n")
+    report.append("\n\n*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*\n")
 
     return report.toString
   } // writeEachProcess()
+
+  private[this] def getDlls(dll: Option[DllInfo]): String = {
+
+    val dllResult = dll.getOrElse(DllInfo("", Vector(DllHexInfo("", "", 0L, 0L)), ""))
+
+    val dllNames: Vector[String] = if(dllResult.memRange.nonEmpty){
+        dllResult.memRange.map(x => x.dllName)
+    } else{
+      Vector("NO INFO")
+    }
+    val allDllNames = dllNames.filterNot(x => x.isEmpty)
+
+    val description: String = if(allDllNames.nonEmpty){
+      val result = for(value <- allDllNames) yield (value, ProcessDescription.get(value.toUpperCase))
+      val resultStr = for(value <- result) yield s"\n\nDLL: ${value._1}\nDESCRIPTION: ${value._2}"
+      resultStr.mkString("\n")
+    }else{
+      ""
+    } // END descriptionTup
+
+    return description
+  } // END getDlls()
 
   private[this] def netActivity(vec: Vector[NetConnections], pid: String): String = {
     var str = ""
@@ -293,16 +325,22 @@ object CreateReport extends FileFun {
     val destIps: Vector[String] = pids.map(x => x.destIP)
     /** Removing local ip addresses */
     val srcFiltered = {
-      srcIps.filterNot(_.startsWith("192\\.")).filterNot(_.startsWith("172\\.")).filterNot(_.startsWith("10\\."))
+      srcIps.filterNot(_.startsWith("192\\."))
+        .filterNot(_.startsWith("172\\."))
+        .filterNot(_.startsWith("10\\."))
+        .filterNot(_.contains("0\\.0\\.0\\.0"))
     }
     val destFiltered = {
-      destIps.filterNot(_.startsWith("192\\.")).filterNot(_.startsWith("172\\.")).filterNot(_.startsWith("10\\."))
+      destIps.filterNot(_.startsWith("192\\."))
+        .filterNot(_.startsWith("172\\."))
+        .filterNot(_.startsWith("10\\."))
+        .filterNot(_.contains("0\\.0\\.0\\.0"))
     }
     if(srcFiltered.nonEmpty){
-      str = "\nThe following external source IP addresses were found:\n" + srcFiltered.mkString("\n")
+      str = "\n\nThe following external source IP addresses were found:\n\n" + srcFiltered.mkString("\n")
     }
     if(destFiltered.nonEmpty){
-      str = str + "\nThe following external destination IP addresses were found:\n" + destFiltered.mkString("\n")
+      str = str + "\n\nThe following external destination IP addresses were found:\n\n" + destFiltered.mkString("\n")
     }
 
     return str
@@ -339,17 +377,17 @@ object CreateReport extends FileFun {
       if (pidMal.nonEmpty)
         report.append("\n\nMALWARE SIGNATURES FOUND:\n\n" + pidMal.mkString("\n"))
       if (pidAnti.nonEmpty)
-        report.append("\n\nAntidebug Signatures Found:\n\n" + pidAnti.mkString("\n"))
+        report.append("\n\nANTIDEBUG SIGNATURES FOUND:\n\n" + pidAnti.mkString("\n"))
       if (pidCVE.nonEmpty)
-        report.append("\n\nCVEs(Malware) Found:\n\n" + pidCVE.mkString("\n"))
+        report.append("\n\nCVES(MALWARE) FOUND:\n\n" + pidCVE.mkString("\n"))
       if (pidExploit.nonEmpty)
-        report.append("\n\nExploit Kits Found:\n\n" + pidExploit.mkString("\n"))
+        report.append("\n\nEXPLOIT KITS FOUND:\n\n" + pidExploit.mkString("\n"))
       if (pidShells.nonEmpty)
-        report.append("\n\nWebshells Found:\n\n" + pidShells.mkString("\n"))
+        report.append("\n\nWEBSHELLS FOUND:\n\n" + pidShells.mkString("\n"))
       if (pidMalDoc.nonEmpty)
-        report.append("\n\nMalicious Documents Found:\n\n" + pidMalDoc.mkString("\n"))
+        report.append("\n\nMALICIOUS DOCUMENTS FOUND:\n\n" + pidMalDoc.mkString("\n"))
       if (pidPack.nonEmpty)
-        report.append("\n\nPackers Found:\n\n" + pidPack.mkString("\n"))
+        report.append("\n\nPACKERS FOUND:\n\n" + pidPack.mkString("\n"))
       // if(pidSuspStr.nonEmpty)""
       report.toString()
     }
@@ -359,9 +397,9 @@ object CreateReport extends FileFun {
   private[this] def checkYaraLessImportant(yara: YaraBrain, pid: String): String = {
     var str = ""
     val urls = yara.url
-    val pidUrls = urls.filter(x => x.proc.contains(pid))
+    val pidUrls = urls.filter(x => x.proc.contains(pid)).distinct
     if(pidUrls.nonEmpty)
-      str = "\n\nURLs Found By Yara:\n" + pidUrls.mkString("\n")
+      str = "\n\nURLs FOUND BY YARA:\n" + pidUrls.mkString("\n")
 
     return str
   } // END
@@ -408,6 +446,7 @@ object CreateReport extends FileFun {
   /** Check for meterpreter DLL */
   private[this] def checkMeterpreter(vec: Vector[LdrInfo]) = {
     var str = ""
+
     val meter = vec.map(x => (x.pid, x.meterpreter))
     val meterFound = meter.filter(_._2 == true)
     if(meterFound.nonEmpty) {
@@ -694,11 +733,11 @@ object CreateReport extends FileFun {
 object ProcessDescription {
 
   private[windows] def get( processName: String ): String = {
-    val firstTwo = processName.take( 2 )
 
+    val firstTwo = Try(processName.take( 2 )).getOrElse("11")
 
     val byteInt = firstTwo.getBytes()
-      .map( x => x.toInt.toString )
+      .map( x => Try(x.toInt.toString).getOrElse("") )
       .foldLeft( "" )( ( x, y ) => x + y ).toInt
 
     val tree: TreeMap[String, String] = matchProcess( byteInt )
@@ -708,46 +747,42 @@ object ProcessDescription {
   } // get()
 
   /** This is an example of how we'll retrieve the process description. */
-  private[this] def matchProcess( byteInt: Int ): TreeMap[String, String] = {
+  private[this] def matchProcess( value: Int ): TreeMap[String, String] = {
 
-    val value = byteInt
-    var result = new TreeMap[String, String]()
-
-    if (4848 until 6575 contains value) result = Proc00AK.get()
-    else if (6585 until 6682 contains value) result = ProcAUBR.get()
-    else if (6683 until 6773 contains value) result = ProcBSCI.get()
-    else if (6774 until 6778 contains value) result = ProcCJCN.get()
-    else if (6779 until 6787 contains value) result = ProcCOCW.get()
-    else if (6787 until 6875 contains value) result = ProcCXDK.get()
-    else if (6876 until 6973 contains value) result = ProcDLEI.get()
-    else if (6974 until 7072 contains value) result = ProcEJFH.get()
-    else if (7073 until 7279 contains value) result = ProcFIHO.get()
-    else if (7280 until 7367 contains value) result = ProcHPIC.get()
-    else if (7368 until 7378 contains value) result = ProcIDIN.get()
-    else if (7379 until 7576 contains value) result = ProcIOKL.get()
-    else if (7577 until 7676 contains value) result = ProcKMLL.get()
-    else if (7677 until 7766 contains value) result = ProcLMMB.get()
-    else if (7767 until 7775 contains value) result = ProcMCMK.get()
-    else if (7776 until 7788 contains value) result = ProcMLMX.get()
-    else if (7789 until 7880 contains value) result = ProcMYNP.get()
-    else if (7881 until 7982 contains value) result = ProcNQOR.get()
-    else if (7983 until 8070 contains value) result = ProcOSPF.get()
-    else if (8071 until 8082 contains value) result = ProcPGPR.get()
-    else if (8083 until 8265 contains value) result = ProcPRRA.get()
-    else if (8266 until 8280 contains value) result = ProcRBRP.get()
-    else if (8281 until 8367 contains value) result = ProcRRSC.get()
-    else if (8368 until 8375 contains value) result = ProcSDSK.get()
-    else if (8376 until 8383 contains value) result = ProcSLSS.get()
-    else if (8384 until 8466 contains value) result = ProcSTTB.get()
-    else if (8467 until 8483 contains value) result = ProcTCTS.get()
-    else if (8484 until 8667 contains value) result = ProcTTVC.get()
-    else if (8668 until 8766 contains value) result = ProcVDWB.get()
-    else if (8767 until 8782 contains value) result = ProcWCWR.get()
-    else if (8783 until 9090 contains value) result = ProcWSZZ.get()
+    val result = if (4848 until 6575 contains value) Proc00AK.get()
+    else if (6585 until 6682 contains value)  ProcAUBR.get()
+    else if (6683 until 6773 contains value)  ProcBSCI.get()
+    else if (6774 until 6778 contains value) ProcCJCN.get()
+    else if (6779 until 6787 contains value) ProcCOCW.get()
+    else if (6787 until 6875 contains value) ProcCXDK.get()
+    else if (6876 until 6973 contains value) ProcDLEI.get()
+    else if (6974 until 7072 contains value) ProcEJFH.get()
+    else if (7073 until 7279 contains value) ProcFIHO.get()
+    else if (7280 until 7367 contains value) ProcHPIC.get()
+    else if (7368 until 7378 contains value) ProcIDIN.get()
+    else if (7379 until 7576 contains value) ProcIOKL.get()
+    else if (7577 until 7676 contains value) ProcKMLL.get()
+    else if (7677 until 7766 contains value) ProcLMMB.get()
+    else if (7767 until 7775 contains value) ProcMCMK.get()
+    else if (7776 until 7788 contains value) ProcMLMX.get()
+    else if (7789 until 7880 contains value) ProcMYNP.get()
+    else if (7881 until 7982 contains value) ProcNQOR.get()
+    else if (7983 until 8070 contains value) ProcOSPF.get()
+    else if (8071 until 8082 contains value) ProcPGPR.get()
+    else if (8083 until 8265 contains value) ProcPRRA.get()
+    else if (8266 until 8280 contains value) ProcRBRP.get()
+    else if (8281 until 8367 contains value) ProcRRSC.get()
+    else if (8368 until 8375 contains value) ProcSDSK.get()
+    else if (8376 until 8383 contains value) ProcSLSS.get()
+    else if (8384 until 8466 contains value) ProcSTTB.get()
+    else if (8467 until 8483 contains value) ProcTCTS.get()
+    else if (8484 until 8667 contains value) ProcTTVC.get()
+    else if (8668 until 8766 contains value) ProcVDWB.get()
+    else if (8767 until 8782 contains value) ProcWCWR.get()
+    else if (8783 until 9090 contains value) ProcWSZZ.get()
+    else new TreeMap[String, String]()
 
     return result
   } // END matchProcess()
-
-
 
 } // END CreateReport
