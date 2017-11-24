@@ -1,10 +1,13 @@
 package com.bbs.vol.utils
 
+import scala.util.Try
+
 trait SearchRange {
 
   /** Putting this off until I need it */
   private[com] def searchIpRange(value: String, start: String, end: String): Boolean = {
-    if(ipToLong(start) to ipToLong(end) contains ipToLong(value)) true
+
+    if(ipToLong(start) to ipToLong(end) contains Try(ipToLong(value)).getOrElse(0L)) true
     else false
 
   } // END ipRange()
@@ -53,7 +56,7 @@ trait SearchRange {
 
   /** convert hex memory location to an integer. */
   private[this] def hex2Long(hex: String): Long = {
-    val bigInt = Integer.parseInt(hex.drop(2), 16)
+    val bigInt = Try(Integer.parseInt(hex.drop(2), 16)).getOrElse(0)
     bigInt.longValue()
     // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
   } // END hex2Long
