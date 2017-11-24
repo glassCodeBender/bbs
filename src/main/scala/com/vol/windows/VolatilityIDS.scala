@@ -134,6 +134,86 @@ object VolatilityIDS extends FileFun {
   /***************************************** END main() ***********************************/
   /****************************************************************************************/
 
+  /***********************
+    * Post report scans.
+    **********************/
+
+  /**
+    *  This method throws a broken pipe exception. Probably a dependency issue.
+    */
+  private[this] def deviceTreeScan(memFile: String, os: String, kdbg: String): String = {
+
+    /** We want to look at network, keyboard, and disk drivers (389) Also look for unnamed devices */
+    var deviceTree = ""
+    if(kdbg.nonEmpty){
+      deviceTree = {
+        Try( s"python vol.py --conf-file=user_config.txt devicetree".!!.trim )
+          .getOrElse("There was an error while reading devicetree scan...")
+      }
+    }else{
+      deviceTree = {
+        Try( s"python vol.py -f $memFile --profile=$os devicetree".!!.trim )
+          .getOrElse("There was an error while reading devicetree scan...")
+      }
+    }
+
+    return deviceTree
+  } // END deviceTreeScan()
+
+  /** Until I fully understand the output of envars module, I'm just going to return full output */
+  private[this] def envScan(memFile: String, os: String, kdbg: String): String = {
+
+    println("\n\nRunning envars scan...\n\n")
+
+    /** environmental variables scan */
+    var envars = ""
+    if(kdbg.nonEmpty){
+      envars = {
+        Try( s"python --conf-file=user_config.txt envars".!!.trim ).getOrElse("")
+      }
+    }else {
+      envars = {
+        Try( s"python vol.py -f $memFile --profile=$os envars --silent".!!.trim ).getOrElse("")
+      }
+    }
+
+    return envars
+
+    /*
+    /** WARNING: Check with actual output because we might not need to drop while "---" */
+
+    /** Separate into lines to filter out unnecessary info and then turn it back into a string */
+    val filtered: String = parseOutputDashEnv(envVars.getOrElse("")).mkString("\n")
+
+    /** Creates a Vector with the information for each PID in each slot  */
+    val splitEnvVars: Vector[String] = envVars.getOrElse("").split("\\*+").toVector
+
+    /** first filter out USERNAME, USERDOMAIN, SESSIONNAME, USERPROFILE lines */
+    val filteredEnv = splitEnvVars.filterNot(_.contains("USERNAME"))
+
+    /** Use to pull out the PID */
+    val lookaheadPID = """(?<=PID\s)\d+""".r
+
+    /** Contains all the PIDs*/
+    val pids: Vector[Option[String]] = splitEnvVars.map(x => lookaheadPID.findFirstIn(x))
+
+    /** Use to pull out the PPID  */
+    val lookaheadPPID = """(?<=PPID\s)\d+""".r
+
+    /** Contains a Vector made up of PPIDs  */
+    val ppids: Vector[Option[String]] = splitEnvVars.map(x => lookaheadPPID.findFirstIn(x))
+
+    // For each section separated by **** we need Pid, PPid and variables.
+    // it probably won't hurt to save other info like USERNAME & USERPROFILE.
+
+    // For version 1.0 of this program, we'll suppress output of known variables with --silent (p. 230).
+    // Eventually we might want to make this more robust because the envars module is super powerful.
+
+    // envars module can be extremely helpful for determining which processes are infected (229)
+
+*/
+  } // END envScan()
+
   /** Parses the config file. */
   private[this] def parseConfig( ): Vector[String] = {
 
@@ -397,7 +477,7 @@ object FindSuspiciousProcesses {
     /** (pid -> Remote Mapped Drive) */
     val remoteMapped: Vector[(String, String)] = disc.remoteMapped
     /** Vector[String], Vector[String] */
-    val registry = disc.registry
+    // val registry = disc.registry
     /** svcStopped, suspCmds */
     val sysSt: SysState = disc.sysState
     val shim = disc.shimCache
@@ -682,7 +762,6 @@ object FindSuspiciousProcesses {
       else riskRating = 50
     }
 
-
   } // END checkRegistry()
 
   private[this] def checkSysState(sys: SysState): Int = {
@@ -914,3 +993,49 @@ object FindSuspiciousProcesses {
 
 
 } // END FindSuspiciousProcesses object
+
+object ExtraScans {
+
+  private[this] def sysRegistryCheckXP(memFile: String, os: String, kdbg: String): Vector[String] = {
+
+    val key1 =  "\"Microsoft\\Windows\\CurrentVersion\\RunOnce\""
+    val key2 = "\"Microsoft\\Windows\\CurrentVersion\\Run\""
+    val key3 = "\"SYSTEM\\CurrentControlSet\\Control\\" + "Session Manager\\" + "Memory Management\\" + "PrefetchParameters\""
+
+    var runOnce = ""
+    var run = ""
+    var prefetch = ""
+
+    if(kdbg.nonEmpty){
+      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key1".!!.trim ).getOrElse("")
+      run =Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key2".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -g $kdbg -K $key3".!!.trim ).getOrElse("")
+    } else{
+      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim ).getOrElse("")
+    } // END if/else
+
+    return Vector(runOnce, run, prefetch)
+  }
+  private[this] def userRegistryCheckXP(memFile: String, os: String, kdbg: String): Vector[String] = {
+    val quote = "\""
+
+    val key1 =  "\"HKEY_CURRENT_USER\\Software\\Microsoft\\CurrentVersion\\RunOnce\""
+    val key2 = "\"HKEY_CURRENT_USER\\Software\\Microsoft\\CurrentVersion\\Run\""
+
+    var runOnce = ""
+    var run = ""
+
+    if(kdbg.nonEmpty){
+      runOnce = Try(s"python --conf-file=user_config.txt printkey -g $kdbg -K $key1".!!.trim ).getOrElse("")
+      run =Try(s"python vol.py --conf-file=user_config.txt printkey -g $kdbg -K $key2".!!.trim ).getOrElse("")
+    } else{
+      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
+    } // END if/else
+
+    return Vector(run, runOnce)
+  } // END userRegistryCheckXP()
+
+}
