@@ -138,8 +138,15 @@ object ProcessDiscoveryWindows extends VolParse {
     val regPersistenceInfo: Vector[RegPersistenceInfo] = {
       for(proc <- process) yield DetectRegPersistence.run(memFile, os, kdbg, proc.pid, proc.offset, proc.hidden)
     } // END regPersistenceInfo
-    println("\n\nPrint registry persistence info: \n\n")
-    regPersistenceInfo.foreach(println)
+
+    val filterRegInfo = regPersistenceInfo.filter(x => x.handles.runKey.nonEmpty)
+
+    if(filterRegInfo.nonEmpty){
+      println("\n\nPrint registry persistence info: \n\n")
+      filterRegInfo.foreach(println)
+    }else{
+      println("\n\nNo evidence was found that an attacker established registry persistence on the machine.\n\n")
+    }
 
     println("\n\nScanning to determine process networking capabilities...\n\n")
 
@@ -176,7 +183,7 @@ object ProcessDiscoveryWindows extends VolParse {
   * Currently this method returns the entire scan result if network artifacts are found.
   * Method might be unnecessary
   */
-    return ProcessBrain(yaraScan, regPersistenceInfo, dllInfo, ldrInfo, enabledPrivs, malfind, netPidMap, promiscMap )
+    return ProcessBrain(yaraScan, filterRegInfo, dllInfo, ldrInfo, enabledPrivs, malfind, netPidMap, promiscMap )
   } // END run()
 
   /**********************************************************************/
@@ -1397,7 +1404,12 @@ object DllScan extends VolParse {
 
     val dllWithProcRemoved: Vector[String] = dllWithRemoveIAT.map(y => y.toLowerCase).filter(x => x.contains(".dll"))
 
-    val grabDllInfo: Vector[DllHexInfo] = locateDll(pid, dllWithProcRemoved, hid)
+    /** Need to test to determine when this was changed. Vista might be in the old category. */
+    val grabDllInfo: Vector[DllHexInfo] = if(os.contains("WinXP") || os.contains("Win2003")){
+      locateDllOld(pid, dllWithProcRemoved, hid )
+    }else{
+      locateDll7(pid, dllWithProcRemoved, hid)
+    }
 
     /** RETURN Statement we want to know pid, memory range, and commandline stuff. */
     if(commandLine.nonEmpty) DllInfo(pid, grabDllInfo, Try(commandLine(0)).getOrElse("Command Line: "))
@@ -1405,20 +1417,42 @@ object DllScan extends VolParse {
   } // END dllListScan()
 
   /** Find DLL memory location ranges.  */
-  private[this] def locateDll(pid: String, dllWithRemoveIAT: Vector[String], hid: Boolean): Vector[DllHexInfo] = {
+  private[this] def locateDllOld(pid: String, dllWithRemoveIAT: Vector[String], hid: Boolean): Vector[DllHexInfo] = {
 
     val dllRegex = "\\w+\\.dll".r
 
     val parse2d: Option[Vector[Vector[String]]] = vecParse(dllWithRemoveIAT)
     val parsedRemoveOpt = parse2d.getOrElse(Vector[Vector[String]]())
 
-    val pertinentInfo: Vector[Vector[String]] = {
-      parsedRemoveOpt.map(x => Vector(Try(x(0)).getOrElse(""), Try(x(1)).getOrElse(""),
-        fixDllName(Try(x(6)).getOrElse(""),Try(x(6)).getOrElse(""),Try(x(6)).getOrElse(""),Try(x(6)).getOrElse(""))))
-          //dllRegex.findFirstIn(Try(x(4)).getOrElse("")).getOrElse(""),
-          // dllRegex.findFirstIn(Try(x(3)).getOrElse("")).getOrElse(""),
-          // dllRegex.findFirstIn(Try(x(3)).getOrElse("")).getOrElse("") ) ))
-    }
+    val pertinentInfo: Vector[Vector[String]] = parsedRemoveOpt.map(x => Vector(Try(x(0)).getOrElse(""), Try(x(1)).getOrElse(""),
+      fixDllName(Try(x(3)).getOrElse(""),Try(x(4)).getOrElse(""),Try(x(5)).getOrElse(""),Try(x(6)).getOrElse(""))))
+
+    /** Here is where the error occurs */
+    val hexRange: Vector[DllHexInfo] = for {
+      line <- pertinentInfo
+    } yield new DllHexInfo(pid, Try(line(2)).getOrElse("0").trim,
+      Try(hex2Int(line(0))).getOrElse(0),
+      Try(hex2Int(line(0))).getOrElse(0L) + Try(hex2Int(line(1))).getOrElse(0L) )
+
+    return hexRange
+  } // END locateDll()
+
+  /************************************************************************
+    ***********************************************************************
+    * THIS NEEDS TO BE CHANGED BASED ON WINDOWS XP VERSUS WINDOWS 7!!!!!
+    ***********************************************************************
+    ***********************************************************************/
+
+  /** Find DLL memory location ranges.  */
+  private[this] def locateDll7(pid: String, dllWithRemoveIAT: Vector[String], hid: Boolean): Vector[DllHexInfo] = {
+
+    val dllRegex = "\\w+\\.dll".r
+
+    val parse2d: Option[Vector[Vector[String]]] = vecParse(dllWithRemoveIAT)
+    val parsedRemoveOpt = parse2d.getOrElse(Vector[Vector[String]]())
+
+    val pertinentInfo: Vector[Vector[String]] = parsedRemoveOpt.map(x => Vector(Try(x(0)).getOrElse(""), Try(x(1)).getOrElse(""),
+        fixDllName(Try(x(6)).getOrElse(""),Try(x(7)).getOrElse(""),Try(x(8)).getOrElse(""),Try(x(9)).getOrElse(""))))
 
     /** Here is where the error occurs */
     val hexRange: Vector[DllHexInfo] = for {
