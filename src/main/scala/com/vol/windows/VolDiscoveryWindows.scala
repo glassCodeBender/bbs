@@ -25,23 +25,11 @@ import sys.process._
   */
 
 
-
-/**
-  * IDEAS:
-  * Write loop to create regexes like this "\w+system32/\w+[kernel32.dll]
-  * - the [kernel32.dll] part of regex can be created using list generated from prefetch parser.
-  * - Look for DLLs: ws2_32.dll, crypt32.dll, hnetcfg.dll, pstorec.dll
-  */
-
 /**
   * TO DO!!!!
   *
-  * 1. Create a directory to store the following:
-  * - Send pcap files to file
-  * - Extract MFT
-  * - Extract Log Files.
-  * 2. Write Config File.
-  * 3. Fix Bugs.
+  * 1. Execute commands consecutively since they block, then use multi-threadening on post-processing.
+  * 2. Hollowfind
   */
 
 /********************************* CASE CLASSES ************************/
@@ -191,7 +179,6 @@ object VolDiscoveryWindows extends VolParse {
 
    val shimCache = shimCacheEntries(memFile, os, kdbg)
 
-
     println("\n\nExtracting Event Logs...")
     // extractEVT(memFile, os, dump)
     println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...")
@@ -283,85 +270,7 @@ object VolDiscoveryWindows extends VolParse {
 
     return shimcache
   } // END shimCacheEntries()
-  /**
-    * Get the results of checking system registry keys sometimes indicative of persistence
-    *
-    * THIS NEEDS TO BE CHECKED!!!!!
-    */
-  private[this] def sysRegistryCheck(memFile: String, os: String, kdbg: String): Vector[String] = {
-    val quote = "\""
 
-    val key1 =  "\"SOFTWARE\\Microsoft\\CurrentVersion\\RunOnce\""
-    val key2 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Policies\\Explorer\\Run\""
-    val key3 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Run\""
-    val key4 = "\"SYSTEM\\CurrentControlSet\\Services\""
-    val key5 = "\"SYSTEM\\CurrentControlSet\\Control\\" +
-      "Session Manager\\" + "Memory Management\\" + "PrefetchParameters\""
-
-    var runOnce = ""
-    var run = ""
-    var explorerRun = ""
-    var prefetch = ""
-    var service = ""
-
-    if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py --conf-file=user_config.txt printkey -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py --conf-file=user_config.txt $kdbg printkey -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key4".!!.trim ).getOrElse("")
-    } else{
-      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key4".!!.trim ).getOrElse("")
-    } // END if/else
-
-
-    val vec: Vector[String] = {
-      Vector(runOnce, explorerRun, run, service, prefetch)
-    }
-
-    return vec
-  } // END sysRegistryCheck()
-
-  /** Get the results of checking user registry keys sometimes indicative of persistence or anti-forensics */
-  private[this] def userRegistryCheck(memFile: String, os: String, kdbg: String): Vector[String] = {
-    val key1 =  "\"SOFTWARE\\Microsoft\\" + "Windows NT" + "\\CurrentVersion\\Windows\""
-    val key2 = "\"SOFTWARE\\Microsoft\\" + "Windows NT" + "\\CurrentVersion\\Windows\\Run\""
-    val key3 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\Run\""
-    val key4 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnce\""
-    val key5 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnceEx\""
-
-    var runOnce = ""
-    var run = ""
-    var explorerRun = ""
-    var prefetch = ""
-    var service = ""
-
-    /** The variable names here are wrong, but I don't want to deal w/ it. */
-    if(kdbg.nonEmpty){
-      runOnce = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py --conf-file=user_config.txt printkey -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key4".!!.trim ).getOrElse("")
-    } else{
-      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
-      explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
-      run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim ).getOrElse("")
-      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key5".!!.trim ).getOrElse("")
-      service = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key4".!!.trim ).getOrElse("")
-    } // END if/else
-
-    return Vector(runOnce, explorerRun, run, service, prefetch)
-  } // END userRegistryCheck()
-
-  /** Need to add ethscan plugin. */
-  def pcap(memFile: String, os: String, dump: String) = {
-    Try(s"python vol.py -f $memFile --profile=$os ethscan -C $dump/out.pcap".! ).getOrElse("")
-  }
 } // END AutomateVolDiscoveryWindows object
 
 /** ******************** ProcessBbsScan object ************************/
@@ -644,7 +553,6 @@ object ProcessBbsScan extends VolParse with CaseTransformations {
         Try(vec(3)).getOrElse("0"), "")
     }
 
-
   } // END shortProcess()
 
   /** Makes sure that we can handle processes that have spaces in their names */
@@ -866,6 +774,14 @@ object NetScan extends VolParse with SearchRange {
 
   } // END run()
 
+  /****************************************************
+    ***************************************************
+    ***************************************************
+    *       THERE IS A PROBLEM WITH THIS CODE!!!
+    ***************************************************
+    ***************************************************
+    ***************************************************/
+
   private[this] def netScan(net: String): (Vector[NetConnections], Vector[String]) = {
 
     val netParsed: Vector[String] = Source.fromString(net)
@@ -879,7 +795,7 @@ object NetScan extends VolParse with SearchRange {
     val includesListening = for{
       value <- net2d
       if value(4) != "LISTENING" || value(4) != "CLOSED" || value(4) != "ESTABLISHED"
-    } yield Vector(value(0).trim, value(1).trim, value(2).trim, value(3).trim, "NOINFO", value(5).trim, value(5).trim,
+    } yield Vector(value(0).trim, value(1).trim, value(2).trim, value(3).trim, "NOINFO", value(4).trim, value(5).trim,
       Try(value(6)).getOrElse("") + " " + Try(value(7)).getOrElse("") + " " + Try(value(8)).getOrElse(""))
 
     val discludesListening = for{
@@ -892,38 +808,38 @@ object NetScan extends VolParse with SearchRange {
 
     val connects = for {
       line <- allListening
-      if {!line(2).startsWith("198") || !line(2).startsWith("10\\.") || !line(2).startsWith("172") &
-        line(3).startsWith("198") || line(3).startsWith("10\\.") || line(3).startsWith("172")}
+      if {!line(2).startsWith("198") || !line(2).startsWith("10.") || !line(2).startsWith("172") &
+        line(3).startsWith("198") || line(3).startsWith("10.") || line(3).startsWith("172")}
     } yield new NetConnections(getPid(line(4)) + getPid(line(5)) + getPid(line(6)),
       line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, false )
     // parse
     val connects2 = for {
       line <- allListening
-      if {line(2).startsWith("198") || line(2).startsWith("10\\.") || line(2).startsWith("172\\.") &
-        !line(3).startsWith("198") || !line(3).startsWith("10\\.") || !line(3).startsWith("172\\.")}
+      if {line(2).startsWith("198") || line(2).startsWith("10.") || line(2).startsWith("172") &
+        !line(3).startsWith("198") || !line(3).startsWith("10.") || !line(3).startsWith("172")}
     } yield new NetConnections(getPid(line(4)) + getPid(line(5)) + getPid(line(6)),
       line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", false, true )
     // parse
 
     val connects3 = for{
       line <- allListening
-      if {line(3).startsWith("198") || line(3).startsWith("10\\.") || line(3).startsWith("172\\.") &
-        line(2).startsWith("198") || line(2).startsWith("10\\.") || line(2).startsWith("172\\.")}
+      if {line(3).startsWith("198") || line(3).startsWith("10.") || line(3).startsWith("172.") &
+        line(2).startsWith("198") || line(2).startsWith("10.") || line(2).startsWith("172.")}
     } yield new NetConnections(getPid(line(4)) + getPid(line(5)) + getPid(line(6)),
       line(1), line(2), line(3), line(2).splitLast(':')(1) == "5800", true, true )
 
     val foreignSrc = connects.map(x => x.srcIP)
-      .filterNot(_.startsWith("10\\."))
+      .filterNot(_.startsWith("10."))
       .filterNot(_.startsWith("192"))
       .filterNot(_.startsWith("172"))
-      .filterNot(_.contains("0\\.0\\.0\\.0"))
-      .filterNot(_ == "\\*:\\*")
+      .filterNot(_.contains("0.0.0.0"))
+      .filterNot(_ == "*:*")
     val foreignDest = connects.map(x => x.destIP)
-      .filterNot(_.startsWith("10\\."))
+      .filterNot(_.startsWith("10."))
       .filterNot(_.startsWith("192"))
       .filterNot(_.startsWith("172"))
-      .filterNot(_.contains("0\\.0\\.0\\.0"))
-      .filterNot(_ == "\\*:\\*")
+      .filterNot(_.contains("0.0.0.0"))
+      .filterNot(_ == "*:*")
 
     val allConnects = connects ++: connects2 ++: connects3
 
@@ -956,21 +872,21 @@ object NetScan extends VolParse with SearchRange {
 
     val connects = for {
       line <- conn2d
-      if !line(1).startsWith("198") || !line(1).startsWith("10\\.") || !line(1).startsWith("172\\.")
+      if !line(1).startsWith("198") || !line(1).startsWith("10\\.") || !line(1).startsWith("172.")
     } yield new NetConnections(line(3), "ConnScan", line(1), line(2), line(2).splitLast(':')(1) == "5800", true, false )
 
     val connects2 = for {
       line <- conn2d
-      if !line(2).startsWith("198") || !line(2).startsWith("10\\.") || !line(2).startsWith("172\\.")
+      if !line(2).startsWith("198") || !line(2).startsWith("10.") || !line(2).startsWith("172")
     } yield new NetConnections(line(3), "ConnScan", line(1), line(2), line(2).splitLast(':')(1) == "5800", false, true )
 
-    val destIps = connects.map(x => x.destIP)
-    val srcIps = connects.map(x => x.srcIP)
+    val destIps = connects.map(x => x.destIP).map(_.trim)
+    val srcIps = connects.map(x => x.srcIP).map(_.trim)
     val ips = destIps ++: srcIps
     val foreignIps = ips.filterNot(_.startsWith("198"))
       .filterNot(_.startsWith("172"))
-      .filterNot(_.startsWith("10\\."))
-      .filterNot(_.contains("0\\.0\\.0\\.0"))
+      .filterNot(_.startsWith("10."))
+      .filterNot(_.contains("0.0.0.0"))
 
     return (connects, foreignIps)
   } // END connScan()
@@ -992,11 +908,17 @@ object NetScan extends VolParse with SearchRange {
   private[this] def whoisLookup(vec: Vector[String]) = {
     val ips = vec.distinct
 
-    val result = for(connection <- ips) yield getWhoIs(connection)
+    val regex = "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}".r
 
-    val cleanedResult = result.filterNot(x => x.name.contains("Failed."))
+    val filterOnlyIpv4 = ips.map(x => regex.findFirstIn(x))
+    val ipAddr = filterOnlyIpv4.flatten
+
+    val result = for(connection <- ipAddr) yield getWhoIs(connection)
+
+    val cleanedResult = result.filterNot(x => x.name.contains("Failed"))
     println("Printing whois lookup result...")
     cleanedResult.foreach(println)
+
     cleanedResult
   } // END whoisLookup()
 
@@ -1100,7 +1022,6 @@ object SysStateScan extends VolParse {
       } // END if
       else{
         tempStr += (vec(i) + "|\n")
-
       } // END if/else
 
       i = i + 1
