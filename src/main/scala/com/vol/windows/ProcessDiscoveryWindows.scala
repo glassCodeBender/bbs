@@ -67,7 +67,7 @@ final case class DllHexInfo(pid: String, dllName: String, lowHex: Long, highHex:
 
 /** Case class used if we want to include data found in String column of yarascan. */
 final case class YaraParseString(rule: String, proc: String, str: String) {
-  override def toString =  str + "\n"
+  override def toString =  "Rule: " + rule + " FOUND: " + str + "\n"
 } // END case class YaraParseString
 
 /** Stores information we find out about the privileges each PID has. */
@@ -267,12 +267,20 @@ object ProcessDiscoveryWindows extends VolParse {
   /** Scan with malfind for each individual process. */
   private[this] def malfindPerPid(memFile: String, os: String, kdbg: String, pid: String,
                                   offset: String, hid: Boolean): (String, String) = {
-    var malScan = ""
-    if(kdbg.nonEmpty){
-        malScan = Try( s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
-      else
-        malScan = Try( s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
-    } // END if kdbg.nonEmpty()
+
+    val malScan = if (kdbg.nonEmpty) {
+      if (hid) {
+        Try(s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
+      } else {
+        Try(s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
+      } // END if kdbg.nonEmpty()
+    }else{
+      if (hid) {
+        Try(s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
+      } else {
+        Try(s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
+      } // END if kdbg.nonEmpty()
+    }
 
     return (pid, malScan)
   } // END malfindPerPid()
@@ -520,13 +528,24 @@ object AutomateYara extends VolParse with SearchRange {
     /** Vector of Array that contains offsets. I THINK THIS WORKS! */
     val ipOffset: Vector[Vector[String]] = ipCheck.map(x => x._2.map(y => y.offset))
 
+    val cleanUpOffset: Vector[String] = ipOffset.flatten
+      val flatOffset = cleanUpOffset.filter(x => x.nonEmpty)
+
+    /******************************************************************
+      *****************************************************************
+      *****************************************************************
+      * THIS WORKED BEFORE BUT I SCREWED IT UP WHEN I ADDED NETSCAN ***
+      *****************************************************************
+      *****************************************************************
+      *****************************************************************/
+
     println("Printing IP offsets\n\n")
     for{
       value <- ipOffset
       result <- value
     } println("Offset: " + result)
 
-    val flatOffset: Vector[String] = ipOffset.flatten
+    // val flatOffset: Vector[String] = ipOffset.flatten
     println("Testing out flatOffset...\n\n")
     flatOffset.foreach(println)
 
@@ -604,10 +623,15 @@ object AutomateYara extends VolParse with SearchRange {
 
   private[this] def runIp(memFile: String, os: String,  kdbg: String, info: Vector[(String, String)], pids: Vector[String]) = {
 
-    val uniqInfo = info.distinct
+    val ipRegex = "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}".r
+
+    val filterUnecessaryIps: Vector[(String, String)] = info.filterNot(x => x._2.contains("0\\.0\\.0\\.0"))
+      .map(y => (y._1, ipRegex.findFirstIn(y._2).getOrElse("")))
+
+    val allIps = filterUnecessaryIps.filterNot(x => x._2.isEmpty).distinct
 
     val ipResult: Vector[(String, Vector[YaraParse])] = {
-      for(ip <- uniqInfo) yield findIps(memFile, os, kdbg, ip._1, ip._2, pids)
+      for(ip <- allIps) yield findIps(memFile, os, kdbg, ip._1, ip._2, pids)
     }
 
     ipResult
@@ -615,7 +639,7 @@ object AutomateYara extends VolParse with SearchRange {
 
   /** Convert hexidecimal value to Long */
   private[this] def hex2Int(hex: String): Long = {
-    val bigInt = new BigInteger(hex.drop(2), 16)
+    val bigInt = Try(new BigInteger(hex.drop(2), 16)).getOrElse(new BigInteger("0"))
     return bigInt.longValue()
     // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
   }
@@ -623,22 +647,24 @@ object AutomateYara extends VolParse with SearchRange {
   /** Search hex ranges for DLLs inside them. */
   private[this] def searchRange(dllHex: Vector[DllHexInfo], hexItem: Vector[String]): ArrayBuffer[ArrayBuffer[String]] = {
 
+    val hexToSearch = hexItem.filter(x => x.contains("0x"))
+
     println("Running searchRange()\n\n")
     var i = 0
     var j = 0
-    var buff = ArrayBuffer[ArrayBuffer[String]]()
+    val buff = ArrayBuffer[ArrayBuffer[String]]()
 
     var bool = false
 
-    while (i < hexItem.length){
+    while (i < hexToSearch.length){
       j = 0
       while(j < dllHex.length){
-        bool = searchHexRange(hexItem(i), dllHex(j).lowHex, dllHex(j).highHex)
+        bool = Try(searchHexRange(hexToSearch(i), dllHex(j).lowHex, dllHex(j).highHex)).getOrElse(false)
         if(bool){
           /** SHOULD CLEAN UP hexItem!!! */
-            println(s"Searching for ${hexItem(i)} between ${dllHex(j)} and ${dllHex(j)}\n")
-          val hexLong = Try(hexItem(i).toLong).getOrElse(0L)
-          val tup = ArrayBuffer(dllHex(j).dllName, dllHex(j).pid, "0x" + hexLong.toHexString )
+            println(s"Searching for ${hexToSearch(i)} between ${dllHex(j)} and ${dllHex(j)}\n")
+          val hexLong = Try(hexToSearch(i).toLong).getOrElse(0L)
+          val tup = ArrayBuffer(dllHex(j).dllName, dllHex(j).pid, "0x" + Try(hexLong.toHexString).getOrElse("0") )
           buff ++: tup
         }
         j = j + 1
@@ -810,30 +836,22 @@ object AutomateYara extends VolParse with SearchRange {
   private[this] def findIps(memFile: String, os: String, kdbg: String, pid: String, ip: String, pids: Vector[String]): (String, Vector[YaraParse]) = {
     var yaraByIp = ""
 
-    val ipNoPort = ip.splitLast(':')(0)
-
-    var str = ""
-    if(kdbg.nonEmpty){
-      if (pids.contains(pid)){
-        println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
-
-        yaraByIp = {
-          Try( s"python vol.py --conf-file=user_config.txt yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
-            .getOrElse(s"No results for $ipNoPort in $pid")
-        }
+    val str = if (pids.contains(pid)){
+          Try( s"python vol.py --conf-file=user_config.txt yarascan -p $pid -W --yara-rules=$ip".!!.trim )
+            .getOrElse(s"No results for $ip in $pid")
       }
-    }else{
-      if (pids.contains(pid)){
-        println(s"Search for IP addresses for PID: $pid with Port Number: $ipNoPort...\n\n")
-
-        yaraByIp = {
-          Try( s"python vol.py -f $memFile --profile=$os yarascan -p $pid -W --yara-rules=$ipNoPort".!!.trim )
-            .getOrElse(s"No results for $ipNoPort in $pid")
-        }
+      else if(pids.contains(pid)){
+          Try( s"python vol.py -f $memFile --profile=$os yarascan -p $pid -W --yara-rules=$ip".!!.trim )
+            .getOrElse(s"No results for $ip in $pid")
+      } else{
+        ""
       }
+
+    val yaraParsed: Vector[YaraParse] = if(str.nonEmpty){
+      parseYaraResults(str, "IP")
+    } else {
+      Vector(YaraParse("", "", "", ""))
     }
-
-    val yaraParsed: Vector[YaraParse] = parseYaraResults(str, "IP")
 
     return (pid, yaraParsed)
     // Need to parse the results
@@ -1011,8 +1029,7 @@ object AutomateYara extends VolParse with SearchRange {
   * that is not helpful. We are more concerned with the Run key than the other keys.
   */
 /** (Key -> count),(Key -> Scan Results) */
-case class RegPersistenceInfo(pid: String,
-                               persistenceMap: mutable.Map[String, Int],
+case class RegPersistenceInfo(persistenceMap: mutable.Map[String, Int],
                               scanMap: mutable.Map[String, Option[String]],
                               handles: RegistryHandles){
   override def toString( ): String = {
@@ -1070,19 +1087,14 @@ object DetectRegPersistence extends VolParse {
     *         and the count of the times run occurs.
     */
   def regPersistence( memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean ): RegistryHandles = {
-    var detectRegPersistence = ""
 
 
     /*** DOES NOT WORK FOR HIDDEN PROCESSES */
-    if(kdbg.nonEmpty){
-        detectRegPersistence = {
+    val detectRegPersistence =  if(kdbg.nonEmpty){
           Try( s"python vol.py --conf-file=user_config.txt handles --object-type=Key --pid=$pid".!!.trim ).getOrElse("")
-        }
       }
     else {
-        detectRegPersistence = {
           Try(s"python vol.py -f $memFile --profile=$os handles --object-type=Key --pid=$pid".!!.trim).getOrElse("")
-      }
     }
 
     /** We need to look through registry key names and find ones w/ numerous open handles to the same key */
@@ -1141,7 +1153,6 @@ object DetectRegPersistence extends VolParse {
     val regMap: mutable.Map[String, Int] = mutable.Map[String, Int]()
     val scanMap: mutable.Map[String, Option[String]] = mutable.Map[String, Option[String]]()
 
-    var pid = ""
     for(key <- arr) {
       scanMap += {
         if(kdbg.nonEmpty){
@@ -1150,11 +1161,10 @@ object DetectRegPersistence extends VolParse {
           (key -> Some( s"python vol.py -f $memFile --profile=$os printkey -K $key".!!.trim ))
         }
       }
-      pid = key
       regMap += (key -> map(key))
     }
 
-    return RegPersistenceInfo(pid, regMap, scanMap, handles )
+    return RegPersistenceInfo(regMap, scanMap, handles )
   } // END interrogateReg()
 } // END RegPersistence object
 
@@ -1292,26 +1302,23 @@ object DllScan extends VolParse {
     * @param pid
     */
   private[this] def ldrScan(memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean): LdrInfo = {
-    /** We want to find each process that has a False value in it.
-      * We also want to look for executables w/ no Mapped Path */
 
-    /**
+    /**********************************************************
     // regex to find exec w/ no mapped path. NOT USED IN CODE!!
-    */
+    ***********************************************************/
     val noMappedPath = ".*\\.\\.".r
 
-    var ldr = ""
-    if(kdbg.nonEmpty){
+    val ldr = if(kdbg.nonEmpty){
       if(hid)
-        ldr = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset -v".!!.trim ).getOrElse("")
+        Try( s"python vol.py --conf-file=user_config.txt --offset=$offset -v".!!.trim ).getOrElse("")
       else
-        ldr = Try( s"python vol.py --conf-file=user_config.txt ldrmodules -p $pid -v".!!.trim ).getOrElse("")
+        Try( s"python vol.py --conf-file=user_config.txt ldrmodules -p $pid -v".!!.trim ).getOrElse("")
     }
     else {
       if (hid)
-        ldr = Try(s"python vol.py -f $memFile --profile=$os ldrmodules --offset=$offset -v".!!.trim).getOrElse("")
+        Try(s"python vol.py -f $memFile --profile=$os ldrmodules --offset=$offset -v".!!.trim).getOrElse("")
       else
-        ldr = Try(s"python vol.py -f $memFile --profile=$os ldrmodules -p $pid -v".!!.trim).getOrElse("")
+        Try(s"python vol.py -f $memFile --profile=$os ldrmodules -p $pid -v".!!.trim).getOrElse("")
     } // END if/else kdbg.nonEmpty
 
     val ldrParsed: Vector[String] = parseOutputNoTrim(ldr).getOrElse(Vector[String]())
@@ -1352,7 +1359,7 @@ object DllScan extends VolParse {
     val pattern = "0x\\w+".r
     val baseLocations: Vector[String] = cleanedProbs.map(x => pattern.findFirstIn(x).getOrElse(""))
 
-    val dllPattern = "\\w+\\.dll".r   // PREVIOUS REGEX: "\\w+\\.dll$".r
+    val dllPattern = "\\w+\\.[Dd][Ll][Ll]".r   // PREVIOUS REGEX: "\\w+\\.dll$".r
     // val nameLine = cleanedProbs.filter(_.contains("mem"))
     val dllName = cleanedProbs.map(x => dllPattern.findFirstIn(x).getOrElse(""))
 
@@ -1368,80 +1375,80 @@ object DllScan extends VolParse {
   /** Returns PID, Vector with Memory Location range of DLL, and Command Line Information) */
   private[this] def dllListScan(memFile: String, os: String, kdbg: String, pid: String, offset: String, hid: Boolean): DllInfo = {
 
-    var dllList = ""
-    if(kdbg.nonEmpty){
+    val dllList = if(kdbg.nonEmpty){
       if (hid)
-        dllList = Try( s"python vol.py --conf-file=user_config.txt dlllist --offset=$offset".!!.trim ).getOrElse("")
+        Try( s"python vol.py --conf-file=user_config.txt dlllist --offset=$offset".!!.trim ).getOrElse("")
       else
-        dllList = Try( s"python vol.py --conf-file=user_config.txt dlllist -p $pid".!!.trim ).getOrElse("")
+        Try( s"python vol.py --conf-file=user_config.txt dlllist -p $pid".!!.trim ).getOrElse("")
     }else{
       if (hid)
-        dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist --offset=$offset".!!.trim ).getOrElse("")
+        Try( s"python vol.py -f $memFile --profile=$os dlllist --offset=$offset".!!.trim ).getOrElse("")
       else
-        dllList = Try( s"python vol.py -f $memFile --profile=$os dlllist -p $pid".!!.trim ).getOrElse("")
+        Try( s"python vol.py -f $memFile --profile=$os dlllist -p $pid".!!.trim ).getOrElse("")
     } // END if/else kdbg.nonEmpty
 
     val parseAsterisks: Vector[String] = parseOutputAsterisks(dllList).getOrElse(Vector[String]())
-
     val commandLine = parseAsterisks.filter(_.contains("Command"))
-    val filterDLL: Vector[String] = parseOutputDashVec(dllList).getOrElse(Vector[String]())
 
-    val grabDllInfo: Vector[DllHexInfo] = locateDll(memFile, os, kdbg, pid, offset, hid)
+    val filterDLL: Vector[String] = parseOutputDashVec(dllList).getOrElse(Vector[String]())
 
     /** Filter out DLLs loaded because specified by IAT (not explicitly loaded) */
     val dllWithRemoveIAT = filterDLL.filterNot(_.contains("0xffff"))
 
-    val dllWithProcRemoved: Vector[String] = dllWithRemoveIAT.filter(x => x.toLowerCase.contains(".dll"))
+    val dllWithProcRemoved: Vector[String] = dllWithRemoveIAT.map(y => y.toLowerCase).filter(x => x.contains(".dll"))
 
-    /** RETURN Statement
-      * We want to know pid, memory range, and commandline stuff. */
-    if(commandLine.nonEmpty) DllInfo(pid, grabDllInfo, commandLine(0))
+    val grabDllInfo: Vector[DllHexInfo] = locateDll(pid, dllWithProcRemoved, hid)
+
+    /** RETURN Statement we want to know pid, memory range, and commandline stuff. */
+    if(commandLine.nonEmpty) DllInfo(pid, grabDllInfo, Try(commandLine(0)).getOrElse("Command Line: "))
     else DllInfo(pid, grabDllInfo, "")
   } // END dllListScan()
 
   /** Find DLL memory location ranges.  */
-  private[this] def locateDll(memFile: String, os: String, kdbg: String,
-                              pid: String, offset: String, hid: Boolean): Vector[DllHexInfo] = {
-    var dllList = ""
-    if(kdbg.nonEmpty){
-      if (hid)
-        dllList = Try( s"python vol.py --conf-file=user_config.txt --offset=$offset dlllist".!!.trim ).getOrElse("")
-      else
-        dllList = Try( s"python vol.py --conf-file=user_config.txt -p $pid dlllist".!!.trim ).getOrElse("")
-    }
-    else{
-      if (hid)
-        dllList = Try( s"python vol.py -f $memFile --profile=$os --offset=$offset dlllist".!!.trim ).getOrElse("")
-      else
-        dllList = Try( s"python vol.py -f $memFile --profile=$os -p $pid dlllist".!!.trim ).getOrElse("")
-    }
+  private[this] def locateDll(pid: String, dllWithRemoveIAT: Vector[String], hid: Boolean): Vector[DllHexInfo] = {
 
+    val dllRegex = "\\w+\\.dll".r
 
-    val parsed: Option[Vector[String]] = parseOutputDashVec(dllList)
-
-    /** Filter out DLLs loaded because specified by IAT (not explicitly loaded) */
-    val dllWithRemoveIAT = parsed.filterNot(_.contains("0xffff"))
-
-    val parse2d: Option[Vector[Vector[String]]] = vecParse(dllWithRemoveIAT.getOrElse(Vector[String]()))
+    val parse2d: Option[Vector[Vector[String]]] = vecParse(dllWithRemoveIAT)
     val parsedRemoveOpt = parse2d.getOrElse(Vector[Vector[String]]())
 
     val pertinentInfo: Vector[Vector[String]] = {
-      parsedRemoveOpt.map(x => Vector(Try(x(0)).getOrElse(""), Try(x(1)).getOrElse(""), Try(x(3)).getOrElse("")))
+      parsedRemoveOpt.map(x => Vector(Try(x(0)).getOrElse(""), Try(x(1)).getOrElse(""),
+        fixDllName(Try(x(6)).getOrElse(""),Try(x(6)).getOrElse(""),Try(x(6)).getOrElse(""),Try(x(6)).getOrElse(""))))
+          //dllRegex.findFirstIn(Try(x(4)).getOrElse("")).getOrElse(""),
+          // dllRegex.findFirstIn(Try(x(3)).getOrElse("")).getOrElse(""),
+          // dllRegex.findFirstIn(Try(x(3)).getOrElse("")).getOrElse("") ) ))
     }
 
     /** Here is where the error occurs */
     val hexRange: Vector[DllHexInfo] = for {
       line <- pertinentInfo
-    } yield new DllHexInfo(pid, Try(line(2)).getOrElse("0"),
+    } yield new DllHexInfo(pid, Try(line(2)).getOrElse("0").trim,
                 Try(hex2Int(line(0))).getOrElse(0),
                 Try(hex2Int(line(0))).getOrElse(0L) + Try(hex2Int(line(1))).getOrElse(0L) )
 
     return hexRange
   } // END locateDll()
 
+  /** this needs to be a lot more complicated */
+  private[this] def fixDllName(index6: String, index7: String, index8: String, index9: String ): String = {
+
+    val removeExtensionReg = "(\\s|\\w)+\\.[dD][lL][lL]".r
+
+    val dllName = if (index9.nonEmpty) {
+      index6 + " " + index7 + " " + index8 + " " + index9
+    } else if (index8.nonEmpty) {
+      index6 + " " + index7 + " " + index8
+    } else if (index7.nonEmpty) {
+      index6 + " " + index7
+    } else index6
+
+    removeExtensionReg.findFirstIn(dllName).getOrElse(dllName)
+  } // END fixDll()
+
   /** convert hex memory location to an integer. */
   private[this] def hex2Int(hex: String): Long = {
-    val bigInt = new BigInteger(hex.drop(2), 16)
+    val bigInt = Try(new BigInteger(hex.drop(2), 16)).getOrElse(new BigInteger("0"))
 
     return bigInt.longValue()
     // hex.toList.map("0123456789abcdef".indexOf(_)).reduceLeft(_ * 16 + _)
