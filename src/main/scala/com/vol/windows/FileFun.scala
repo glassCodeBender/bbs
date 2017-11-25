@@ -1,5 +1,5 @@
 package com.bbs.vol.utils
-import java.io.{File, PrintWriter}
+import java.io.{File, PrintWriter, FileWriter}
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.nio.file.{Files, Paths}
 
@@ -26,6 +26,26 @@ trait FileFun {
     writer.write(dataStr)
     writer.close()
   } // END writeToFile()
+
+  private[vol] def appendToFile(fileName: String, data: String) = {
+    val writer = new PrintWriter(new FileWriter(fileName, true))
+    // val dataStr = data.mkString("\n")
+
+    /** Write CSV to a file. */
+    writer.write(data)
+    writer.close()
+
+  } // END appendToFile()
+
+  private[vol] def appendToFile(fileName: String, data: Seq[String]) = {
+    val writer = new PrintWriter(new FileWriter(fileName, true))
+    val dataStr = data.mkString("\n")
+
+    /** Write CSV to a file. */
+    writer.write(dataStr)
+    writer.close()
+
+  } // END appendToFile()
 
   /**
     * Read a file and tranform or filter it
