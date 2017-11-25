@@ -3,11 +3,18 @@ package com.bbs.vol.windows
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
+import com.bbs.vol.httpclient.GetDllDescription
 import com.bbs.vol.processtree._
 import com.bbs.vol.utils.FileFun
 
 import scala.collection.immutable.TreeMap
 import scala.util.Try
+
+/**
+  * TO DO:
+  * ## Need to show orphan threads.
+  * ## Need to create regex to use in python mft parser and timeliner programs.
+  */
 
 object CreateReport extends FileFun {
 
@@ -210,7 +217,7 @@ object CreateReport extends FileFun {
         * This should include a description
         */
     val hiddenDllNames: Vector[String] = ldr.dllName
-    val dllAndDescription = hiddenDllNames.map(x => "\nHidden Dll Name: " + x + "\nDescription: " + ProcessDescription.get(x))
+    val dllAndDescription = hiddenDllNames.map(x => "\nHidden Dll Name: " + x + "\nDescription: " + ProcessDescription.get(x.toUpperCase()))
     if(hiddenDllNames.nonEmpty)
       report.append(s"\nHidden DLLS FOUND IN ${proc.name}:\n" + dllAndDescription.mkString("\n\n") )
       if(ldr.meterpreter)
@@ -294,6 +301,11 @@ object CreateReport extends FileFun {
     if(connections.nonEmpty)
       report.append(connections)
 
+
+    val dlls: String = getDlls(dllPerPid.headOption)
+    if(dlls.nonEmpty)
+      report.append(s"\n\nDLL INFO:\n" + dlls)
+
     /**
       * MAP!!
       */
@@ -302,13 +314,11 @@ object CreateReport extends FileFun {
     val ppidMalfind = procBrain.malfind.getOrElse(proc.ppid, "")
 
     if(malfind.nonEmpty)
-      report.append("\nMALFIND FOUND THE FOLLOWING RESULTS FOR " + proc.name + s"\n\n$malfind")
+      report.append("\n\nMALFIND PRODUCED THE FOLLOWING RESULTS FOR " + proc.name + s"\n\n$malfind")
+    /** Consider omitting this. */
     if(ppidMalfind.nonEmpty)
-      report.append(s"\nMALFIND FOUND THE FOLLOWING RESULTS FOR THE PARENT OF ${proc.name}: $ppidName PID ${proc.ppid}\n\n$ppidMalfind")
+      report.append(s"\n\nMALFIND RESULTS FOR THE PARENT OF ${proc.name}: $ppidName PID ${proc.ppid}\n\n$ppidMalfind")
 
-    val dlls: String = getDlls(dllPerPid.headOption)
-    if(dlls.nonEmpty)
-      report.append(s"\n\nDLL INFO:\n" + dlls)
 
     /**
       * NEED TO ADD METHOD FOR TRYING TO PRINT HIDDEN DLL INFO
@@ -336,7 +346,7 @@ object CreateReport extends FileFun {
     val allDllNames = dllNames.filterNot(x => x.isEmpty).distinct
 
     val description: String = if(allDllNames.nonEmpty){
-      val result = for(value <- allDllNames) yield (value, ProcessDescription.get(value.toUpperCase))
+      val result = for(value <- allDllNames) yield (value, findDllDescription(value.toUpperCase))
       val resultStr = for(value <- result) yield s"\n\nDLL: ${value._1}\nDESCRIPTION: ${value._2}"
       resultStr.mkString("\n")
     }else{
@@ -438,12 +448,23 @@ object CreateReport extends FileFun {
 
   } // END checkYaraPerProcess()
 
+  private[this] def findDllDescription(dllName: String) = {
+
+    val description = ProcessDescription.get(dllName)
+    if(description == "UNKNOWN"){
+      GetDllDescription.run(dllName)
+    }else {
+      description
+    }
+
+  } // END getDllDescription()
+
   private[this] def checkYaraLessImportant(yara: YaraBrain, pid: String): String = {
     var str = ""
     val urls: Vector[YaraParseString] = yara.url
     val pidUrls = urls.filter(x => x.proc.contains(pid)).distinct
     if(pidUrls.nonEmpty)
-      str = "\n\nURLs FOUND BY YARA:\n" + pidUrls.mkString("\n")
+      str = "\n\nURLs FOUND BY YARA:\n\n" + pidUrls.mkString("\n")
 
     return str
   } // END
@@ -679,6 +700,9 @@ object CreateReport extends FileFun {
       "ADSERVICE.EXE" -> "Active Disk Service is a component of the Iomega zip drive.",
       "APPSERVICES.EXE" -> "For the Iomega zip drive.",
       "MSIMN.EXE" -> "Outlook Express",
+      "INETINFO.EXE" -> "Used primarily for bebuggin Windows Server IIS. Name used as trojan in past.",
+      "POP3SVC.DLL" -> "Microsoft exchange POP3 mail service.",
+      "APPMGR.EXE" -> "Process belongs to the Windows server operating system.",
       "CCSETMGR.EXE" -> "Also associated with Symantec’s Internet Security Suite. Keep it and protect your PC.",
       "CSRSS.EXE" -> " System process that is the main executable for the Microsoft Client / Server Runtim Server Subsystem. It should not be shut down.",
       "CTFMON.EXE" -> " non-essential system process. If you’re using only English as the language, then it is not needed. However, it’s recommended to leave it alone.",
@@ -850,5 +874,7 @@ object ProcessDescription {
 
     return result
   } // END matchProcess()
-  
+
+
+
 } // END CreateReport
