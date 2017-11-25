@@ -209,7 +209,10 @@ object CreateReport extends FileFun {
       /**
         * This should include a description
         */
-      forReport = ldr.dllName.mkString("\n")
+    val hiddenDllNames: Vector[String] = ldr.dllName
+    val dllAndDescription = hiddenDllNames.map(x => "\nHidden Dll Name: " + x + "\nDescription: " + ProcessDescription.get(x))
+    if(hiddenDllNames.nonEmpty)
+      report.append(s"\nHidden DLLS FOUND IN ${proc.name}:\n" + dllAndDescription.mkString("\n\n") )
       if(ldr.meterpreter)
         report.append("\n\nMETERPRETER DLL FOUND: True!!!!!!")
     }
@@ -220,7 +223,7 @@ object CreateReport extends FileFun {
     }
     /** Add Dll command found */
     val dll: Vector[DllInfo] = procBrain.dllInfo
-    val dllPerPid = dll.filter(x => x.pid.contains(proc.pid))
+    val dllPerPid: Vector[DllInfo] = dll.filter(x => x.pid.contains(proc.pid))
     val dllCommand = if(dllPerPid.nonEmpty) {
       dllPerPid.head.command
     }else{
@@ -305,14 +308,13 @@ object CreateReport extends FileFun {
 
     val dlls: String = getDlls(dllPerPid.headOption)
     if(dlls.nonEmpty)
-      report.append(s"\n\n${proc.name} DLL INFO:" + dlls)
+      report.append(s"\n\nDLL INFO:\n" + dlls)
 
     /**
       * NEED TO ADD METHOD FOR TRYING TO PRINT HIDDEN DLL INFO
       */
 
     val urls = checkYaraLessImportant(yara, proc.pid)
-
 
     if(urls.nonEmpty)
       report.append(urls)
@@ -331,7 +333,7 @@ object CreateReport extends FileFun {
     } else{
       Vector("NO INFO")
     }
-    val allDllNames = dllNames.filterNot(x => x.isEmpty)
+    val allDllNames = dllNames.filterNot(x => x.isEmpty).distinct
 
     val description: String = if(allDllNames.nonEmpty){
       val result = for(value <- allDllNames) yield (value, ProcessDescription.get(value.toUpperCase))
@@ -351,17 +353,17 @@ object CreateReport extends FileFun {
     val destIps: Vector[String] = pids.map(x => x.destIP)
     /** Removing local ip addresses */
     val srcFiltered = {
-      srcIps.filterNot(_.startsWith("192\\."))
-        .filterNot(_.startsWith("172\\."))
-        .filterNot(_.startsWith("10\\."))
-        .filterNot(_.contains("0\\.0\\.0\\.0"))
-    }
+      srcIps.filterNot(_.startsWith("192"))
+        .filterNot(_.startsWith("172"))
+        .filterNot(_.startsWith("10."))
+        .filterNot(_.contains("0.0.0.0"))
+    }.distinct
     val destFiltered = {
-      destIps.filterNot(_.startsWith("192\\."))
-        .filterNot(_.startsWith("172\\."))
-        .filterNot(_.startsWith("10\\."))
-        .filterNot(_.contains("0\\.0\\.0\\.0"))
-    }
+      destIps.filterNot(_.startsWith("192."))
+        .filterNot(_.startsWith("172."))
+        .filterNot(_.startsWith("10."))
+        .filterNot(_.contains("0.0.0.0"))
+    }.distinct
     if(srcFiltered.nonEmpty){
       str = "\n\nThe following external source IP addresses were found:\n\n" + srcFiltered.mkString("\n")
     }
@@ -589,16 +591,22 @@ object CreateReport extends FileFun {
   } // END rootkitCheck()
 
   private[this] def ldrCheck(vec: Vector[LdrInfo]): String = {
-    val unlinkedDlls: Vector[Vector[String]] = vec.map(x => x.probs)
+    val unlinkedDlls: Vector[String] = vec.flatMap(x => x.probs)
 
-    val removeEmptyDlls = unlinkedDlls.filter(x => x.nonEmpty)
+    val fullPathRegex = """\\.+\.dll""".r
+
+    val removeEmptyDlls = unlinkedDlls.map(x => fullPathRegex.findFirstIn(x))
+
+    val dlls = removeEmptyDlls.flatten
+
+    val dllCount = dlls.size
 
     val fixEmpty: Vector[String] = for{
       value <- removeEmptyDlls
     } yield value.mkString(" ")
 
     val str = if(fixEmpty.nonEmpty) {
-      "\nThe following unlinked DLLs were found:\n" + fixEmpty.mkString("\n")
+      s"\n\n$dllCount unlinked DLLs were found:\n" + dlls.mkString("\n")
     } else ""
 
     return str
@@ -656,6 +664,8 @@ object CreateReport extends FileFun {
 
     return reportStr.toString
   } // END malwareFound()
+
+
 
   /** This Map of processes was created to avoid the computationally expensive lookup from the main process database.
     * The program will first check this list before looking in the massive database of processes.
@@ -840,5 +850,5 @@ object ProcessDescription {
 
     return result
   } // END matchProcess()
-
+  
 } // END CreateReport
