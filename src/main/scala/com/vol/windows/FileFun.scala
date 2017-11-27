@@ -1,4 +1,5 @@
 package com.bbs.vol.utils
+
 import java.io.{BufferedWriter, File, FileWriter, PrintWriter}
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.nio.file.{Files, Paths}
@@ -38,7 +39,7 @@ trait FileFun {
   } // END appendToFile()
 
   private[vol] def appendToFile(fileName: String, data: Seq[String]) = {
-    val writer = new PrintWriter(new FileWriter(fileName, true))
+    val writer = new PrintWriter(new BufferedWriter(new FileWriter(fileName, true)))
     val dataStr = data.mkString("\n")
 
     /** Write CSV to a file. */
