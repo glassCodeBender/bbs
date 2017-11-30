@@ -3,7 +3,7 @@ package com.bbs.vol.windows
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
-import com.bbs.vol.httpclient.GetDllDescription
+// import com.bbs.vol.httpclient.GetDllDescription
 import com.bbs.vol.processtree._
 import com.bbs.vol.utils.FileFun
 
@@ -18,7 +18,12 @@ import scala.util.Try
 
 object CreateReport extends FileFun {
 
-  private[windows] def run(memFile: String, os: String, process: ProcessBrain, disc: Discovery, riskRating: Int) = {
+  private[windows] def run(memFile: String,
+                           os: String,
+                           process: ProcessBrain,
+                           disc: Discovery,
+                           riskRating: Int,
+                           projectName: String = "") = {
 
     var forRegex = ""
 
@@ -62,7 +67,12 @@ object CreateReport extends FileFun {
     val promiscModeMap: Map[String, Boolean] = process.promiscMode
 
     /** Write Report */
-    val intro = s"Big Brain Security Volatile IDS Report FOR $memFile $date\n\nSUMMARY:\n\nRISK RATING: $riskRating\n\n"
+    val intro = s"Big Brain Security Volatile IDS Report FOR $memFile $date\n\nSUMMARY:\n\n"
+
+    /**Rootkits Found */
+    val rootkitInfo = rootkitCheck(rootkit)
+
+    report.append(rootkitInfo)
 
     /** Yara malware findings */
     val malware: String = malwareFound(yaraObj)
@@ -88,11 +98,6 @@ object CreateReport extends FileFun {
 
     report.append(ldrInfoCheck)
 
-    /**Rootkits Found */
-    val rootkitInfo = rootkitCheck(rootkit)
-
-    report.append(rootkitInfo)
-
     /** Promiscuous Mode*/
     if(promiscModeMap.nonEmpty) {
 
@@ -103,8 +108,8 @@ object CreateReport extends FileFun {
     val (hiddenStr, forRegexFile): (String, String) = hiddenProcs(proc)
     if(hiddenStr.nonEmpty){
       forRegex = forRegex + forRegexFile
-      report.append("\nTHE FOLLOWING HIDDEN PROCESSES WERE FOUND:\n\nNOTE: " +
-        "If the processes, is not used by anti-virus software, you probably have malware.\n\n"
+      report.append("\n\nTHE FOLLOWING HIDDEN PROCESSES WERE FOUND:\nNOTE: " +
+        "If one of these processes is not System, smss.exe, or used by anti-virus software, you probably have malware.\n\n"
         + hiddenStr)
     }
 
@@ -139,14 +144,14 @@ object CreateReport extends FileFun {
 
     /** Commandline History */
     if(sysSt.consoles.nonEmpty){
-      report.append("FULL COMMANDLINE HISTORY FOUND:\n\n")
+      report.append("\n\nFULL COMMANDLINE HISTORY FOUND:\n\n")
       report.append(sysSt.consoles)
     }
 
     /** PROCESS INFO */
 
     val procTree = disc.proc._2
-    report.append("\nPROCESS TREE RESULTS:\n\n" + procTree )
+    report.append("\n\nPROCESS TREE RESULTS:\n\n" + procTree )
 
     val processInfo = writeProcessInfo(process, disc, yaraObj)
 
@@ -174,9 +179,11 @@ object CreateReport extends FileFun {
       " context into what they are examining. Malicious code can be injected into a process. Do not assume that " +
       "the description of a process is authoritative.\n\n"
 
+    val separator = "\n*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*\n\n"
+
     val processStr = for(value <- vec) yield writeEachProcess(value, yara, ldr, net, procBrain, disc)
 
-    val strResult = "\n\nProcess Information Summary:\n\n" + disclaimer + processStr.mkString("\n\n")
+    val strResult = "\n\nPROCESS INFORMATION SUMMARY:\n\n" + disclaimer + separator + processStr.mkString("\n\n")
 
     return strResult
   } // END writeProcessInfo()
@@ -201,6 +208,8 @@ object CreateReport extends FileFun {
 
     if(ppidName.nonEmpty)
       report.append("\nPARENT NAME: " + ppidName)
+    else
+      report.append("\nPARENT NAME: UNKNOWN!!!")
 
     if(description.nonEmpty)
       report.append("\nDESCRIPTION: " + description)
@@ -353,6 +362,7 @@ object CreateReport extends FileFun {
       ""
     } // END descriptionTup
 
+
     return description
   } // END getDlls()
 
@@ -383,7 +393,6 @@ object CreateReport extends FileFun {
 
     return str
   } // END netActivity()
-
 
   /** Grab Yara info from processes */
   private[this] def checkYaraPerProcess(pid: String, yara: YaraBrain): (String, String) = {
@@ -448,15 +457,21 @@ object CreateReport extends FileFun {
 
   } // END checkYaraPerProcess()
 
-  private[this] def findDllDescription(dllName: String) = {
+  private[this] def findDllDescription(dllName: String): String = {
 
-    val description = ProcessDescription.get(dllName)
+  val description =  ProcessDescription.get(dllName)
     if(description == "UNKNOWN"){
+      appendToFile("unknownDlls.txt", dllName + "\n")
+    }
+
+    /*
+    val result = if(description == "UNKNOWN"){
       GetDllDescription.run(dllName)
     }else {
       description
     }
-
+*/
+    return description
   } // END getDllDescription()
 
   private[this] def checkYaraLessImportant(yara: YaraBrain, pid: String): String = {
@@ -516,8 +531,8 @@ object CreateReport extends FileFun {
     val meter = vec.map(x => (x.pid, x.meterpreter))
     val meterFound = meter.filter(_._2 == true)
     if(meterFound.nonEmpty) {
-      str = "\nA DLL used by meterpreter was found on the system indicating that the system was breached."
-      val dllFound = for(value <- meterFound) yield s"\nA meterpreter DLL was found in PID: ${value._1}"
+      str = "\nA DLL USED BY METERPRETER WAS FOUND ON THE SYSTEM INDICATING THAT THE SYSTEM WAS BREACHED."
+      val dllFound = for(value <- meterFound) yield s"\nThe meterpreter DLL was found in PID: ${value._1}"
       str = str + dllFound.mkString("\n")
     }
 
@@ -534,13 +549,13 @@ object CreateReport extends FileFun {
 
     var tempVec = Vector[String]()
     if (filterCount.nonEmpty){
-      reportStr = "\nDuplicate run keys are an indication that an attacker used the registry to establish persistence.\n"
-      tempVec = for(values <- filterCount) yield s"${values._2} links to the run key were found in PID: ${values._1}"
+      reportStr = "\n\nDUPLICATE RUN KEYS ARE AN INDICATION THAT AN ATTACKER USED THE REGISTRY TO ESTABLISH PERSISTENCE.\n"
+      tempVec = for(values <- filterCount) yield s"${values._2} LINKS TO THE RUN KEY WERE FOUND IN PID: ${values._1}"
       reportStr = reportStr + tempVec.mkString("\n")
 
       if(filterCount.exists(x => x._2 > 8)) {
         reportStr = reportStr + {
-          s"\n\nWe have determined that an attacker used the run key to establish registry persistence.\n"
+          s"\n\nWE HAVE DETERMINED THAT AN ATTACKER USED THE RUN KEY TO ESTABLISH REGISTRY PERSISTENCE!!!!\n"
         }
       }  // END if filterCount exists
     } // END if filterCount.nonEmpty()
@@ -589,23 +604,23 @@ object CreateReport extends FileFun {
     val timers: Vector[String] = root.timers              // done
     val ssdt = root.ssdtFound // done
 
-    if(ssdt) str.append("\nAn inline hook rootkit was found. See ssdt scan for more information.\n")
+    if(ssdt) str.append("\n\nAN INLINE HOOK ROOTKIT WAS FOUND. SEE SSDT SCAN FOR MORE INFORMATION.\n\n")
     if(callbacks._1.nonEmpty){
-      str.append("\nCallbacks were found on the system indicative of a rootkit\n" )
+      str.append("\n\nCALLBACKS WERE FOUND ON THE SYSTEM INDICATIVE OF A ROOTKIT\n\n" )
       str.append("Here are the results we found:\n" + callbacks._1.mkString("\n"))
     }
     if(callbacks._2.nonEmpty){
-      str.append("\nThe following calls to APIs commonly used by rootkits were found:\n")
+      str.append("\n\nTHE FOLLOWING CALLS TO APIS COMMONLY USED BY ROOTKITS WERE FOUND:\n\n")
       str.append(callbacks._2.mkString("\n"))
     }
     if(orphan.nonEmpty){
-      str.append("\nThe following orphan threads were found that may be indicative of a rootkit:\n" + orphan)
+      str.append("\n\nTHE FOLLOWING ORPHAN THREADS WERE FOUND THAT MAY BE INDICATIVE OF A ROOTKIT:\n\n" + orphan)
     }
     if(hiddenMods._1.nonEmpty){
-      str.append("\nThe following hidden kernel modules were found:\n" + hiddenMods._1.mkString("\n"))
+      str.append("\n\nTHE FOLLOWING HIDDEN KERNEL MODULES WERE FOUND:\n\n" + hiddenMods._1.mkString("\n"))
     }
     if(timers.nonEmpty){
-      str.append("\nThe following kernel timers were found indicative of a rootkit:\n" + timers.mkString("\n"))
+      str.append("\n\nTHE FOLLOWING KERNEL TIMERS WERE FOUND INDICATIVE OF A ROOTKIT:\n\n" + timers.mkString("\n"))
     }
 
     return str.toString()
@@ -627,7 +642,7 @@ object CreateReport extends FileFun {
     } yield value.mkString(" ")
 
     val str = if(fixEmpty.nonEmpty) {
-      s"\n\n$dllCount unlinked DLLs were found:\n" + dlls.mkString("\n")
+      s"\n\n$dllCount unlinked DLL(s) was/were found:\n" + dlls.mkString("\n") + "\n\n"
     } else ""
 
     return str
@@ -716,7 +731,7 @@ object CreateReport extends FileFun {
       "REALSCHED.EXE" -> "RealNetworks Scheduler is not an essential process. It checks for updates for RealNetworks products. It can be safely disabled.",
       "RUNDLL32.EXE" -> "A system process that executes DLLs and loads their libraries.",
       "SAVSCAN.EXE" -> "Nortons AntiVirus process.",
-
+      "SPPSVC.EXE" -> "Microsoft Software Protection Platform Service",
       "SEARCHINDEXER.EXE" -> "Standard Windows process",
       "WMIPRVSE.EXE" -> "Standard Windows Process.",
       "TASKLIST.EXE" -> "Executable used to grab Windows processes",
@@ -759,7 +774,7 @@ object CreateReport extends FileFun {
       "TASKHOSTW.EXE" -> "Starts Windows services when OS starts up. For Windows 10 only.",
       "TASKHOSTEX.EXE" -> "Starts Windows services when OS starts up. For Windows 8 only.",
       "TASKHOST.EXE" -> "Starts Windows services when OS starts up. For Windows 7 only.",
-      "DUMPIT.EXE" -> "Used to create memory dumps",
+      "DUMPIT.EXE" -> "Used to create memory dumps.",
       "SERVICES.EXE" -> "An essential process that manages the starting and stopping of services including the those in boot up and shut down. Do not terminate it.",
       "SMSS.EXE" -> " Session Manager SubSystem is a system process that is a central part of the Windows operating system.",
       "SPOOLSV.EXE" -> " Microsoft printer spooler service handles local printer processes. It’s a system file.",
@@ -775,7 +790,10 @@ object CreateReport extends FileFun {
       "DIVXUPDATE.EXE" -> "Runs in the background and checks for updates to DivX Plus. You can simply terminate the updater; it launches automatically when you open any DivX program.",
       "WINWORD.EXE" -> " Microsoft word.",
       "FIREFOX.EXE" -> "Firefox browser",
+      "VMWARETRAY.EXE" -> "VMware Tools.",
+      "VMWAREUSER.EXE" -> "VMware Tools.",
       "CHROME.EXE" -> "Google chrome browser",
+      "ALG.EXE" -> "Application Layer Gateway Service. Component of Windows OS. Provides support for 3rd party procol plug-ins for Internet Connection Sharing and the Windows Firewall.",
       "PSEXEC.EXE" -> "PsExec provides utilities like Telnet and remote control programs like Symantec's PC Anywhere. Commonly used by hackers",
       "WCE.EXE" -> "Windows Credential Editor is a security tool to list logon sessions and add, change, list, and delete associated credentials. Can be used to perform pass-the-hash and obtain security credentials",
       "SAMINSIDE.EXE" -> "A program that allows users to both recover and crack Windows password hashes. Commonly used by hackers.",
