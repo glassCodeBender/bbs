@@ -9,9 +9,17 @@ package com.bbs.vol.windows
 
 /**
   * TO DO
-  * ** Write ethscan analysis
-  * ** Look for executables disguised as non-executables. WordDoc.docx.exe
+  * ** Create BBS_Reports directory and place all results inside directory inside for each scan.
   * ** Look for commonly changed fileNames (e.g. svchost.exe)
+  * ** No DLLs showing up on Server 2003 Domain controller.
+  * ** Connections scan was never fixed!
+  * ** 127.0.0.1 is not external IP address.
+  * ** Try running all scans right away and passing results as argument so we can use multi-threading.
+  * ** Look for malfind that begins w/ MZ
+  * ** What should be the parent of what?
+  * ** Look for which processes are descended from cmd.exe and/or powershell.
+  * ** Add missing common process and dll (crypt32.dll)
+  * ** Ignore certain executables when considering risk of hidden DLLs (services, smss.exe)
   * ** Consider IDT (369)
   * ** Check if module loaded from temp path
   * ** Examine module's path
@@ -119,13 +127,14 @@ object VolatilityIDS extends FileFun {
     // val hiddenExecs = findHiddenExecs(process)
 
     /** Determine overall risk rating for memory image */
-    val riskRating = FindSuspiciousProcesses.run(discoveryResult, processDiscovery)
+    val riskRating = 0 // FindSuspiciousProcesses.run(discoveryResult, processDiscovery)
 
     /** Need to write extract parts of Discovery (proc), and pass it to next section of program. */
 
     /** Write report */
     CreateReport.run(memFile, os, processDiscovery, discoveryResult, riskRating)
 
+    println("\n\nReport written successfully...\n\n")
     /** Do scans not included w/ report and send to file. */
 
     // envars
@@ -140,8 +149,6 @@ object VolatilityIDS extends FileFun {
   /****************************************************************************************/
   /***************************************** END main() ***********************************/
   /****************************************************************************************/
-
-
 
   /** Parses the config file. */
   private[this] def parseConfig( ): Configuration = {
@@ -803,7 +810,7 @@ object FindSuspiciousProcesses {
     var riskRating = 0
 
     /** Services that were stopped that indicate there is a problem.. */
-    val svcStopped: Vector[String] = sys.svcStopped
+    val svcStopped = sys.svcStopped
 
     // ("Wscsvc", "Wuauserv", "BITS", "WinDefend", "WerSvc")
 
@@ -1174,5 +1181,84 @@ object ExtraScans {
 
 */
   } // END envScan()
+
+  /**
+    * Get the results of checking system registry keys sometimes indicative of persistence
+    *
+    * THIS NEEDS TO BE CHECKED!!!!!
+    */
+  private[this] def sysRegistryCheck(memFile: String, os: String, kdbg: String): Vector[String] = {
+
+    val key1 =  "\"SOFTWARE\\Microsoft\\CurrentVersion\\RunOnce\""
+    val key2 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Policies\\Explorer\\Run\""
+    val key3 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Run\""
+    val key4 = "\"SYSTEM\\CurrentControlSet\\Services\""
+    val key5 = "\"SYSTEM\\CurrentControlSet\\Control\\" +
+      "Session Manager\\" + "Memory Management\\" + "PrefetchParameters\""
+
+    var runOnce = ""
+    var run = ""
+    var explorerRun = ""
+    var prefetch = ""
+    var service = ""
+
+    if(kdbg.nonEmpty){
+      runOnce = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py --conf-file=user_config.txt printkey -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py --conf-file=user_config.txt $kdbg printkey -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key4".!!.trim ).getOrElse("")
+    } else{
+      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key4".!!.trim ).getOrElse("")
+    } // END if/else
+
+
+    val vec: Vector[String] = {
+      Vector(runOnce, explorerRun, run, service, prefetch)
+    }
+
+    return vec
+  } // END sysRegistryCheck()
+
+  /** Get the results of checking user registry keys sometimes indicative of persistence or anti-forensics */
+  private[this] def userRegistryCheck(memFile: String, os: String, kdbg: String): Vector[String] = {
+    val key1 =  "\"SOFTWARE\\Microsoft\\" + "Windows NT" + "\\CurrentVersion\\Windows\""
+    val key2 = "\"SOFTWARE\\Microsoft\\" + "Windows NT" + "\\CurrentVersion\\Windows\\Run\""
+    val key3 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\Run\""
+    val key4 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnce\""
+    val key5 = "\"SOFTWARE\\Microsoft\\CurrentVersion\\Windows\\RunOnceEx\""
+
+    var runOnce = ""
+    var run = ""
+    var explorerRun = ""
+    var prefetch = ""
+    var service = ""
+
+    /** The variable names here are wrong, but I don't want to deal w/ it. */
+    if(kdbg.nonEmpty){
+      runOnce = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py --conf-file=user_config.txt printkey -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py --conf-file=user_config.txt printkey -K $key4".!!.trim ).getOrElse("")
+    } else{
+      runOnce = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key1".!!.trim ).getOrElse("")
+      explorerRun =Try(s"python vol.py -f $memFile --profile=$os printkey -K $key2".!!.trim ).getOrElse("")
+      run = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key3".!!.trim ).getOrElse("")
+      prefetch = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key5".!!.trim ).getOrElse("")
+      service = Try(s"python vol.py -f $memFile --profile=$os printkey -K $key4".!!.trim ).getOrElse("")
+    } // END if/else
+
+    return Vector(runOnce, explorerRun, run, service, prefetch)
+  } // END userRegistryCheck()
+
+  /** Need to add ethscan plugin. */
+  def pcap(memFile: String, os: String, dump: String) = {
+    Try(s"python vol.py -f $memFile --profile=$os ethscan -C $dump/out.pcap".! ).getOrElse("")
+  }
 
 }
