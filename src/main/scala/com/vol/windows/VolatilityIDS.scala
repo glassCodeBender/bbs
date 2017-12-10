@@ -21,10 +21,29 @@ package com.bbs.vol.windows
   * ** Add missing common process and dll (crypt32.dll)
   * ** Ignore certain executables when considering risk of hidden DLLs (services, smss.exe)
   * ** Consider IDT (369)
+  * ** Find network, keyboard, and disk drivers.
+  * ** Maybe include most recently loaded drivers in report (or send to separate file)
   * ** Check if module loaded from temp path
   * ** Examine module's path
   * ** Compare driverscan Start address to modules base address. They should match.
   * ** Extract start address from orphan thread, determine which process thread is located in. (How do you get exec end address?)
+  *
+  * MORE TO DO
+  * 1. Execute commands consecutively since they block, then use multi-threadening on post-processing.
+  * 2. Hollowfind
+  * 3. atomscan (432) blank class names and non-ascii characters.
+  * 4. Message hooks for dll injections (456)
+  * 5. Look for DLLs in atom table (459)
+  * 6. Get prefetch filenames, parse, and run against AnalyzePrefetch program for Win7 and earlier.
+  * 7. Combine parsing styles of two yarascan classes.
+  * 8 Check if process imports ntdll.dll (malware 17)
+  *
+  * CONSIDER!
+  * 1. Use getsids to look at admins and other users (include in summary)
+  * 2. Add looking for files created during compression to MFT filter program. (490)
+  * 3. Use sysinternals run to look for RUN key (or other registry keys).
+  * 4. Write python program to filter event logs.
+  *
   *
   * AFTER REPORT PRODUCED:
   * ** Extract DNS cache (340)
