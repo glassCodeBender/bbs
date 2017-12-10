@@ -3,12 +3,13 @@ package com.bbs.vol.windows
 import com.bbs.vol.utils
 import StringOperations._
 import com.bbs.vol.utils.{CaseTransformations, SearchRange}
-
-import com.bbs.vol.httpclient.{WhoIs, PageInfo}
+import com.bbs.vol.httpclient.{PageInfo, WhoIs}
 import java.io.File
 import java.util.Calendar
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.parallel.immutable.ParVector
+import scala.collection.parallel.mutable.ParArray
 import scala.io.Source
 import scala.util.Try
 // import org.apache.commons.net.whois.WhoisClient
@@ -30,6 +31,11 @@ import sys.process._
   *
   * 1. Execute commands consecutively since they block, then use multi-threadening on post-processing.
   * 2. Hollowfind
+  * 3. atomscan (432) blank class names and non-ascii characters.
+  *
+  * CONSIDER!
+  * 1. Use getsids to look at admins and other users (include in summary)
+  *
   */
 
 /********************************* CASE CLASSES ************************/
@@ -44,7 +50,7 @@ final case class ShimCache(lastMod: String, lastUpdate: String, path: String){
 
 /** Store services and privileges info */
 final case class SysState(svcOnePerLine: Vector[String], // Each service on one line w/ sections pipe separated
-                    svcStopped: Vector[String],    // Suspicious services that were found stopped
+                    svcStopped: ArrayBuffer[String],    // Suspicious services that were found stopped
                     consoles: String,              // Full Output of consoles scan.
                     suspCmds: Vector[String]       // If any suspicious commands were run (even though not always suspicious)
                     )              // Full output of envars scan
@@ -111,15 +117,16 @@ final case class ProcessBbs( pid: String,
 
     val result: Vector[ProcessBbs] = for{
       value <- vec
-      if value.ppid == ppid
+      if value.ppid == this.ppid
     } yield value
 
     if (this.ppid == "0") result
-    else if(result.isEmpty) result
+    else if (result.isEmpty) result
     else  result(0) +: result(0).getParents(vec)
 
   } // END getParents()
 } // END ProcessBbs class
+
 
 /****************************************************
   ***************************************************
@@ -149,14 +156,7 @@ object VolDiscoveryWindows extends VolParse {
     // val parents = testGetParents(4).getParents(testGetParents)
 
     // println("Trying to print parents...")
-    // parents.foreach(println)
-
-    /**
-      * WARNING!!!!
-      *
-      * NEED TO FIX HOW PROCESSES ARE PARSED TO INCLUDE PROCESSES W/ SPACES!!!
-      *
-      */
+    // Try(parents.foreach(println)).getOrElse(println("\nPrinting parents failed...\n\n"))
 
     //processScanResults._1.foreach(println) // printing psscan after it was parsed
     //println("\nPrinting process tree results:\n\n")
@@ -170,7 +170,7 @@ object VolDiscoveryWindows extends VolParse {
 
     val remoteMapped: Vector[(String, String)] = RemoteMappedDriveSearch.run(memFile, os, kdbg)
     println("\n\nPrinting remote mapped drives found...\n\n")
-    remoteMapped.foreach(println)
+    Try(remoteMapped.foreach(println)).getOrElse(println("Failed to print remote mapped drives..."))
 
     val rootkitHunt = RootkitDetector.run(memFile, os, kdbg)
 
@@ -180,8 +180,8 @@ object VolDiscoveryWindows extends VolParse {
    val shimCache = shimCacheEntries(memFile, os, kdbg)
 
     println("\n\nExtracting Event Logs...")
-    // extractEVT(memFile, os, dump)
-    println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...")
+    extractEVT(memFile, os, dump)
+    println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...\n")
     val mftFilename = extractMFT(memFile, os, kdbg, dump)
 
     println("\n\nAnalyzing Windows services and gathering information about system state...\n")
@@ -764,7 +764,7 @@ object NetScan extends VolParse with SearchRange {
       var whois = Vector[String]()
 
       if(outsideConns.isEmpty) (conns, Vector[PageInfo]())
-      else (conns, whoisLookup(outsideConns))
+      else (conns, whoisLookup(outsideConns.distinct))
     }else{
       val (netResult, outsideConns): (Vector[NetConnections], Vector[String]) = netScan(net)
 
@@ -774,13 +774,13 @@ object NetScan extends VolParse with SearchRange {
 
   } // END run()
 
-  /****************************************************
-    ***************************************************
-    ***************************************************
-    *       THERE IS A PROBLEM WITH THIS CODE!!!
-    ***************************************************
-    ***************************************************
-    ***************************************************/
+  /**********************************************************************************************************
+    *********************************************************************************************************
+    *********************************************************************************************************
+    *           Need to pass ProcessBbs vector to this to include names in object!!!!                       *
+    *********************************************************************************************************
+    *********************************************************************************************************
+    *********************************************************************************************************/
 
   private[this] def netScan(net: String): (Vector[NetConnections], Vector[String]) = {
 
@@ -834,12 +834,14 @@ object NetScan extends VolParse with SearchRange {
       .filterNot(_.startsWith("172"))
       .filterNot(_.contains("0.0.0.0"))
       .filterNot(_ == "*:*")
+      .filterNot(_.contains("127.0.0.1"))
     val foreignDest = connects.map(x => x.destIP)
       .filterNot(_.startsWith("10."))
       .filterNot(_.startsWith("192"))
       .filterNot(_.startsWith("172"))
       .filterNot(_.contains("0.0.0.0"))
       .filterNot(_ == "*:*")
+      .filterNot(_.contains("127.0.0.1"))
 
     val allConnects = connects ++: connects2 ++: connects3
 
@@ -982,7 +984,7 @@ object SysStateScan extends VolParse {
     */
 
   /** All the service scan related stuff runs out of this method. */
-  private[this] def svcScan(memFile: String, os: String, kdbg: String): (Vector[String], Vector[String]) = {
+  private[this] def svcScan(memFile: String, os: String, kdbg: String): (Vector[String], ArrayBuffer[String]) = {
     // locate windows service records
     println("\n\nRunning svcscan...\n\n")
 
@@ -992,11 +994,13 @@ object SysStateScan extends VolParse {
         Try( s"python vol.py -f $memFile --profile=$os svcscan --verbose".!!.trim ).getOrElse("")
     }
 
+    /** Need to figure out how to spin this off to a separate thread. */
+
     val svcLines = Source.fromString(svc).getLines.toVector
     val svcOneLine: ArrayBuffer[String] = svcParse(svcLines)
 
     /** If this list is not empty, it's likely that someone is using malicious services. */
-    val stoppedSvc: Vector[String] = stoppedSvcs(svcOneLine)
+    val stoppedSvc: ArrayBuffer[String] = stoppedSvcs(svcOneLine)
 
     /** Need to grab */
 
@@ -1011,7 +1015,7 @@ object SysStateScan extends VolParse {
     *  When done, we can use mkString("|") to put our findings in readable format.
     */
   private[this] def svcParse(vec: Vector[String]): ArrayBuffer[String] = {
-    var buff = ArrayBuffer[String]()
+    var buff = new ArrayBuffer[String]()
     var tempStr = ""
 
     var i = 0
@@ -1038,27 +1042,35 @@ object SysStateScan extends VolParse {
     */
 
   /** Finds suspicious services that an adversary potentially stopped */
-  private[this] def stoppedSvcs(arr: ArrayBuffer[String]): Vector[String] = {
+  private[this] def stoppedSvcs(arr: ArrayBuffer[String]): ArrayBuffer[String] = {
 
     /** A list of services that are suspicious if stopped. A lot could be added to list. AV vendors especially */
     val svcs = Vector("Wscsvc", "Wuauserv", "BITS", "WinDefend", "WerSvc")
 
+    /**
+      * Filter for running services and write to disk.
+      * Filter for stopped services and write to disk.
+      */
+
     /** Find the services in the list above and then tell us if any of them were stopped */
-    val foundSvcs: ArrayBuffer[String] = arr.filter(x => svcs.exists(y => x.contains(y)))
-    val stoppedSvcs = foundSvcs.filter(x => x.contains("SERVICE_STOPPED"))
+
+    val stoppedSvcs = arr.filter(x => x.contains("SERVICE_STOPPED"))
+    val foundSvcs = stoppedSvcs.filter(x => svcs.exists(y => x.contains(y)))
+
+    println("\n\nPrinting Stopped Services Found: \n\n")
+    stoppedSvcs.foreach(println)
 
     /** Convert the services back to a readable format */
-    val convertStopped = convertBack(stoppedSvcs)
+    val convertStopped = convertBack(foundSvcs)
 
     return convertStopped
   } // END stoppedSvcs()
 
   /** Convert svcscan back to a readable format. */
   // ArrayBuffer parameter should probably be an IndexedSeq
-  private[this] def convertBack(arr: ArrayBuffer[String]): Vector[String]= {
+  private[this] def convertBack(arr: ArrayBuffer[String]): ArrayBuffer[String]= {
     val splitBack = arr.map(x => x.split('|').mkString)
       .map(_.trim)
-      .toVector
     return splitBack
   } // END convertBack()
 
@@ -1146,7 +1158,7 @@ object SysStateScan extends VolParse {
     // Looks for potentially suspicous commands that might give us insight into what was executed on command prompt.
     // FOR command should probably only return if found at the beginning of a line. (for and do will get false positives)
     val regString = ".*(net\\sview\\s|net\\suse\\s|net\\suser\\s|psexec\\s|smbclient\\s|wget\\s|do\\s|for\\s|" +
-      "wmic\\s+process\\s+call\\s+create\\s|"+
+      "wmic\\s+process\\s+call\\s+create\\s|\\$\\w+|"+
       "netsh|curl\\s|sc\\s|reg\\s|enum\\s|cryptcat\\s|nc\\s|telnet\\s|at\\s|repair\\s|type\\s|backup\\s|nc\\.exe).*"
     val pattern = regString.r
 
@@ -1600,8 +1612,8 @@ object RemoteMappedDriveSearch extends VolParse {
 
     val remoteTup: Vector[(String, String)] = remote2d.map(x => (x(1), x(5)))
 
-    println("\nPrinting Remote Mapped Drive Values\n")
-    remoteTup.foreach(println)
+    // println("\nPrinting Remote Mapped Drive Values\n")
+    // Try(remoteTup.foreach(println)).getOrElse(println("Failed to print remote mapped drives...\n\n"))
 
     return remoteTup
   }
