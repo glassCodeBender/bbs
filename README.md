@@ -1,6 +1,6 @@
 # BBS
 
-This program uses the Volatility Framework. Without the people that contributed to the development of Volatility, I could have never written this program. I didn't do the hard work, they did. All I did was run their programs and parse the data. You would not believe how much work the people at Volatility (I think one of the guys worked at Google) did to make this program possible. I am a very basic programmer. The only reason this program is good is because I used other people's YEARS of work. That's the best thing about programming, all you have to do is find someone better than you and use their work. 
+This program uses the Volatility Framework. Without the people that contributed to the development of Volatility, I could have never written this program. I didn't do the hard work, they did. All I did was run their programs and parse the data. You would not believe how much work the people at Volatility (I think one of the guys worked at Google) did to make this program possible. I am a very basic programmer. The only reason this program is good is because I used other people's YEARS of work. That's the best thing about programming, all you have to do is find someone better than you and use their work. Seriously... there are probably 100 people that have contributed to volatility. I have barely even started this program.
 
 I'll add some people's names after I finish my final exam and fix my webcache. 
 
@@ -26,6 +26,8 @@ COMING SOON:
 - I just started learning about volatility at the beginning of the summer so I'll be adding a lot more to the program next semester.
 - GeoIP Database lookup for foreign IPv4 addresses.
 - I have a list of things I want to add in my code (like hollowfind). I think a lot of the programs will be run after the report is written (like extracting event logs and mfts).
+- Wiki describing programs used. 
+- Some parts of program are a little bit too verbose. 
 
 CURRENT ISSUES:
 - I never ended re-fixed connscan so Windows XP and Server 2003 won't parse correctly. (It used to work back when I only included the destination IP addresses. I haven't tested the updated style of parsing when looking for IP addresses in DLL ranges with yara).
