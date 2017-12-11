@@ -2,7 +2,7 @@
 
 This program uses the Volatility Framework. Without the people that contributed in developing Volatility, I could have never written this program. I didn't do the hard work, they did. All I did was run their programs and parse the data (after intensely reading a very large intimidating book "The Art of Memory Forensics"). You would not believe how much work the people at Volatility (I think one of the guys worked at Google) did to make this program possible. I am a very basic programmer. The only reason this program is good is because I used other people's YEARS of work. That's the best thing about programming, all you have to do is find someone better than you and use their work. Seriously... there are probably 100 people that have contributed to volatility. The vast majority of this program was not written by me.
 
-This program also uses a ton of people's yara rules. I'm not going to name them, but their rules are pretty much what make this program awesome. If you have yara rules I don't use, SUBMIT MORE RULES TO ME!!! I WOULD LOVE TO MAKE THIS PROGRAM BETTER!!!
+This program also uses a ton of people's yara rules. I'm not going to name them, but their rules are pretty much what make this program awesome. If you have yara rules I don't use, SUBMIT MORE RULES TO ME!!! I would love to use your rules to make this program better. 
 
 I'll add some of the Volatility Framework author's names after I finish my final exam and fix my webcache. 
 
