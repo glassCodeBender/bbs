@@ -1,0 +1,51 @@
+# BIG BRAIN SECURITY VOLATILE IDS CONFIGURATION FILE
+#
+# Description:
+# This file allows you to tell the program what kind of system you are analyzing.
+#
+# VOLATILITY PROFILE
+# Profile Examples: WinXPSP3x86, Win7SP1x64, Win2003SP0x86, Win10x64_10586
+# NOTE: To see available profiles use the following command:
+# ~$ python vol.py —info 
+# NOTE: To determine what your current profile is use:
+# ~$ python vol.py [imageFileName.vmem] imageinfo 
+#
+# Enter the profile for your Operating System here:
+profile ~> Win7SP1x64
+# 
+# VOLATILITY MEMORY FILE NAME
+# WARNING: Do not use the fully qualified domain name. Move the file into the volatility-master directory and run the program from there.
+#
+#
+# Memory File Name:
+memoryFileName ~> META-024733.dmp
+#
+# KDBG OFFSET:
+# Manually enter kdbg offset. 
+# TO FIND THIS INFO run:
+# ~$vol.py -f [filename].dmp —profile=[OSprofilename] kdbgscan
+# then look for Offset (v) and enter the Hexidecimal value below.
+# After you find the offset, run psscan to make sure the profile is correct.
+# kdbg ~> 0xf80002a500a0
+#
+## THE FOLLOWING FUNCTIONALITY HAS NOT BEEN ADDED YET ##
+#
+# Dump found malicious processes to a directory?
+# dump ~> false
+# 
+# YARA RULES
+# Add your own yara rules:
+# rules1 ~> yararule.yar 
+# rules2 ~> yararule.yar 
+# rules3 ~> yararule.yar 
+# rules4 ~> yararule.yar 
+# 
+# Search for a suspect IP address in processes
+# 
+# Change how much Information the program gives you.
+# verbose ~> true 
+#
+# The following option will allow users to name their directory or report name(when finished)
+# Project Name: 
+# projectName ~> Coolest Memory Dump Report Ever
+# 
