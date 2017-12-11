@@ -20,14 +20,16 @@ user_config.txt is created if you use the kdbg as an argument. Don't delete it. 
 
 COMING SOON:
 - Separate files will be created with svcscan split up into different sections (e.g. stopped services, running services)
-- File Clean Up: Will get rid of all the extra junk in the volatility directory so it doesn't get 
-- Running blocking scans all at once at the beginning of the program and then using futures to multithread processing.
+- File Clean Up: Will get rid of all the extra junk in the volatility directory so it doesn't get cluttered.
+- Some of the scans will be written to text files (e.g. envars)
+- Program will run scans that block at the beginning of the program and then use futures to multithread processing.
 --- svcscan takes forever to run because the data was difficult to parse. 
-- I just started learning about volatility at the beginning of the summer so I'll be adding a lot more to the program next semester.
+- Event log and mft extraction will be moved to after the report is created.
 - GeoIP Database lookup for foreign IPv4 addresses.
 - I have a list of things I want to add in my code (like hollowfind). I think a lot of the programs will be run after the report is written (like extracting event logs and mfts).
 - Wiki describing programs used. 
 - Some parts of program are a little bit too verbose. 
+- I just started learning about volatility at the beginning of the summer so I'll be adding a lot more to the program next semester.
 
 CURRENT ISSUES:
 - I never ended re-fixed connscan so Windows XP and Server 2003 won't parse correctly. (It used to work back when I only included the destination IP addresses. I haven't tested the updated style of parsing when looking for IP addresses in DLL ranges with yara).
