@@ -31,7 +31,12 @@ COMING SOON:
 - I have a list of things I want to add in my code (like hollowfind). I think a lot of the programs will be run after the report is written (like extracting event logs and mfts).
 - Wiki describing programs used. 
 - Some parts of program are a little bit too verbose. 
+- Allow users to add their own yara files.
+- Parse all yara output into the same kind of object.
 - I just started learning about volatility at the beginning of the summer so I'll be adding a lot more to the program next semester.
+
+DISTANT FUTURE:
+- A basic GUI so users can determine where volatility directory, the memory dump, the os version, and the kdbg. 
 
 CURRENT ISSUES:
 - I never ended re-fixed connscan so Windows XP and Server 2003 won't parse correctly. (It used to work back when I only included the destination IP addresses. I haven't tested the updated style of parsing when looking for IP addresses in DLL ranges with yara).
