@@ -1,4 +1,4 @@
-# BBS
+# BBS Volatile IDS
 
 This program uses the Volatility Framework. Without the people that contributed to the development of Volatility, I could have never written this program. I didn't do the hard work, they did. All I did was run their programs and parse the data. You would not believe how much work the people at Volatility (I think one of the guys worked at Google) did to make this program possible. I am a very basic programmer. The only reason this program is good is because I used other people's YEARS of work. That's the best thing about programming, all you have to do is find someone better than you and use their work. Seriously... there are probably 100 people that have contributed to volatility. The vast majority of this program was not written by me.
 
