@@ -21,6 +21,7 @@ bbs_config.txt contains the information the program uses to run. If you don't fi
 user_config.txt is created if you use the kdbg as an argument. Don't delete it. It will overwrite itself.
 
 COMING SOON:
+- Create regex in txt file for use when filtering MFT and timeliner.
 - Separate files will be created with svcscan split up into different sections (e.g. stopped services, running services)
 - File Clean Up: Will get rid of all the extra junk in the volatility directory so it doesn't get cluttered.
 - Some of the scans will be written to text files (e.g. envars)
