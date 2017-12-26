@@ -1,18 +1,13 @@
 package com.bbs.vol.windows
 
-import com.bbs.vol.utils
 import StringOperations._
 import com.bbs.vol.utils.{CaseTransformations, SearchRange}
 import com.bbs.vol.httpclient.{PageInfo, WhoIs}
 import java.io.File
-import java.util.Calendar
 
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.parallel.immutable.ParVector
-import scala.collection.parallel.mutable.ParArray
 import scala.io.Source
 import scala.util.Try
-// import org.apache.commons.net.whois.WhoisClient
 
 // import scala.collection.mutable
 import sys.process._
@@ -112,7 +107,7 @@ final case class ProcessBbs( pid: String,
     else parent(0)
   } // END parentName()
 
-  /** I'm not sure if this method works. Recursion is scary. */
+  /** vec is a Vector of processes . */
   def getParents(vec: Vector[ProcessBbs]): Vector[ProcessBbs] = {
 
     val result: Vector[ProcessBbs] = for{
@@ -122,6 +117,8 @@ final case class ProcessBbs( pid: String,
 
     if (this.ppid == "0") result
     else if (result.isEmpty) result
+    // if inside vec of processes, there is no ppid that is a pid.
+    else if (!vec.exists(x => vec.exists(y => y.ppid.contains(x.pid)))) result
     else  result(0) +: result(0).getParents(vec)
 
   } // END getParents()
@@ -174,13 +171,16 @@ object VolDiscoveryWindows extends VolParse {
 
     val rootkitHunt = RootkitDetector.run(memFile, os, kdbg)
 
-    /** Contains suspicious SIDs and suspicious usernames */
+    // Contains suspicious SIDs and suspicious usernames
    // val suspiciousSIDs: mutable.Map[String, String] = DetectLateralMovement.run(memFile, os)
 
+    /***************************
+      * THIS NEEDS TO BE FIXED.
+      **************************/
    val shimCache = shimCacheEntries(memFile, os, kdbg)
 
     println("\n\nExtracting Event Logs...")
-    extractEVT(memFile, os, dump)
+    extractEVT(memFile, os, kdbg, dump)
     println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...\n")
     val mftFilename = extractMFT(memFile, os, kdbg, dump)
 
@@ -1679,7 +1679,6 @@ object RemoteMappedDriveSearch extends VolParse {
       symParsed.getOrElse(Vector[String]()).map(x => symLinkPattern.findFirstIn(x))
     }
     val map = mutable.Map[String, String]()
-
 
     var i = 0
     while(i < timeResult.length){
