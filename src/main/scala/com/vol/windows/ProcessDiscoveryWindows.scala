@@ -94,11 +94,13 @@ object ProcessDiscoveryWindows extends VolParse {
 
   /****************************************************
     ***************************************************
-    ******************~~~~~RUN~~~~*********************
+    ******************~~~~~RUN~~~~~********************
     ***************************************************
     ***************************************************/
 
-  private[windows] def run(memFile: String, os: String, kdbg: String, process: Vector[ProcessBbs], netConn: Vector[NetConnections]): ProcessBrain = {
+  private[windows] def run(memFile: String, os: String, kdbg: String,
+                           process: Vector[ProcessBbs], netConn: Vector[NetConnections],
+                           userYaraRules: Vector[String]): ProcessBrain = {
 
     /**
       * LOGIC NEEDS TO BE DIFFERENT NOW THAT WE'RE LOOKING AT OFFSETS.
@@ -117,7 +119,7 @@ object ProcessDiscoveryWindows extends VolParse {
 
     /** Perform all yarascans*/
     println("\n\nScanning memory with yara...\n\n")
-    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, kdbg, process, netConn, dllInfo)
+    val yaraScan: YaraBrain = AutomateYara.run(os, memFile, kdbg, process, netConn, dllInfo, userYaraRules)
 
     /** Determine all parents that a process inherits from. */
     // val parents: Vector[(String, Vector[(String, String)])] = for(pid <- pidVec) yield getParents(pid, process)
@@ -171,7 +173,7 @@ object ProcessDiscoveryWindows extends VolParse {
     }
     enabledPrivs.foreach(println)
 
-    println("Scanning memory with malfind...")
+    println("\nScanning memory with malfind...\n\n")
     /** Perform malfind scan*/
     val malfind: Map[String, String] = malfindScan(memFile, os, kdbg, process)
 
@@ -276,6 +278,13 @@ object ProcessDiscoveryWindows extends VolParse {
                                   offset: String, hid: Boolean): (String, String) = {
 
     val malScan = if (kdbg.nonEmpty) {
+        Try(s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
+    }else{
+        Try(s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
+    } // END if/else
+
+    /*
+    val malScan = if (kdbg.nonEmpty) {
       if (hid) {
         Try(s"python vol.py --conf-file=user_config.txt malfind --offset=$offset".!!.trim).getOrElse("")
       } else {
@@ -288,7 +297,7 @@ object ProcessDiscoveryWindows extends VolParse {
         Try(s"python vol.py -f $memFile --profile=$os malfind -p $pid".!!.trim).getOrElse("")
       } // END if kdbg.nonEmpty()
     }
-
+*/
     return (pid, malScan)
   } // END malfindPerPid()
 
@@ -342,17 +351,12 @@ object ProcessDiscoveryWindows extends VolParse {
 
     println("\n\nSearching for filename discrepancies...\n\n")
 
-    var fileNameDiscrep = ""
-    if(kdbg.nonEmpty){
-      fileNameDiscrep = {
+    val fileNameDiscrep = if(kdbg.nonEmpty){
         Try( s"python vol.py -f $memFile --conf-file=user_config.txt -t File, Mutant --silent".!!.trim )
           .getOrElse("")
-      }
     }else{
-      fileNameDiscrep = {
         Try( s"python vol.py -f $memFile --profile=$os -p $pid handles -t File, Mutant --silent".!!.trim )
           .getOrElse("")
-      }
     }
 
     /** Make sure the filenames in the details and the filenames for each process match (182) */
@@ -399,13 +403,12 @@ object ProcessDiscoveryWindows extends VolParse {
       "SeLoadDriverPrivilege", "SeChangeNotifyPrivilege", "SeShutdownPrivilege" )
 
     // There are a lot of other privileges that should probably be added to the list.
-    var privsScan = ""
     /** Allows us to determine which privilege the process enabled (list on 171-172) */
-    if(kdbg.nonEmpty){
-        privsScan = Try( s"python vol.py --conf-file=user_config.txt privs -p $pid".!!.trim ).getOrElse("")
+    val privsScan = if(kdbg.nonEmpty){
+        Try( s"python vol.py --conf-file=user_config.txt privs -p $pid".!!.trim ).getOrElse("")
     }
     else{
-        privsScan = Try( s"python vol.py -f $memFile --profile=$os privs -p $pid".!!.trim ).getOrElse("")
+        Try( s"python vol.py -f $memFile --profile=$os privs -p $pid".!!.trim ).getOrElse("")
     }
 
     /** Only gives privileges that a process specifically enabled by process. */
@@ -468,7 +471,8 @@ final case class YaraSuspicious(packers: Vector[YaraParse],
                                 webshells: Vector[YaraParse],
                                 cve: Vector[YaraParse],
                                 malDocs: Vector[YaraParse],
-                                suspStrings: Vector[YaraParseString]){
+                                suspStrings: Vector[YaraParseString],
+                                userScans: Option[Vector[YaraParseString]]){
   override def toString(): String = {
     "\n\nPackers:\n" +
       packers.mkString("\n") +
@@ -495,11 +499,12 @@ final case class YaraSuspicious(packers: Vector[YaraParse],
 
 object AutomateYara extends VolParse with SearchRange {
   private[windows] def run( os: String,
-           memFile: String,
+                            memFile: String,
                             kdbg: String,
-           process: Vector[ProcessBbs],
-           net: Vector[NetConnections],
-           dllInfo: Vector[DllInfo] ): YaraBrain = {
+                            process: Vector[ProcessBbs],
+                            net: Vector[NetConnections],
+                            dllInfo: Vector[DllInfo],
+                            userYaraRules: Vector[String]): YaraBrain = {
 
     val allDllInfo: Vector[Vector[DllHexInfo]] = for(dll <- dllInfo) yield dll.memRange
 
@@ -520,7 +525,6 @@ object AutomateYara extends VolParse with SearchRange {
 
     val flatLocateDll: Vector[DllHexInfo] = locateDll.flatten
 
-    println("Attempting to flatten locateDll...\n\n")
     flatLocateDll.foreach(println)
 
     // (pid -> Pertinent yara info )
@@ -536,7 +540,7 @@ object AutomateYara extends VolParse with SearchRange {
     val ipOffset: Vector[Vector[String]] = ipCheck.map(x => x._2.map(y => y.offset))
 
     val cleanUpOffset: Vector[String] = ipOffset.flatten
-      val flatOffset = cleanUpOffset.filter(x => x.nonEmpty)
+    val flatOffset = cleanUpOffset.filter(x => x.nonEmpty)
 
     /******************************************************************
       *****************************************************************
@@ -608,6 +612,11 @@ object AutomateYara extends VolParse with SearchRange {
     val mal3: Vector[YaraParseString]  = checkForMal3(memFile, os, kdbg)
     val mal4: Vector[YaraParseString]  = checkForMal4(memFile, os, kdbg)
 
+    val userResults: Vector[YaraParseString] = {
+      if(userYaraRules.nonEmpty) runUserScans(memFile, os, kdbg, userYaraRules)
+      else Vector(YaraParseString("", "", ""))
+    }
+
     /** Concat all malware scans together. */
     val concatMal: Vector[YaraParseString] = mal1 ++: mal2 ++: mal3 ++: mal4
 
@@ -618,7 +627,7 @@ object AutomateYara extends VolParse with SearchRange {
 
     /** There are so many scans that we had to encapsulate some of the scans in a different object. */
     val lowHitScans: YaraSuspicious = {
-      YaraSuspicious(packers, antidebug, exploitKits, webshells, cveFound, malDocs, suspString)
+      YaraSuspicious(packers, antidebug, exploitKits, webshells, cveFound, malDocs, suspString, Some(userResults))
     }
 
     // println("\n\nScanning for cryptography in process memory...\n\nThis may take a while...\n\n")
@@ -627,6 +636,25 @@ object AutomateYara extends VolParse with SearchRange {
     /** When this program is run main full program, this will be returned */
     return YaraBrain(urls, ipRule, concatMal, lowHitScans, crypto, searchHex)
   } // END run()
+
+  private[this] def runUserScans(memFile: String, os: String, kdbg: String, userFileNames: Vector[String]): Vector[YaraParseString] = {
+    val result = for(value <- userFileNames) yield checkUserYara(memFile, os, kdbg, value)
+
+    result.flatten
+  } // END runUserScans()
+
+  private[this] def checkUserYara(memFile: String, os: String, kdbg: String, userFileName: String): Vector[YaraParseString] = {
+
+    val str = if(kdbg.nonEmpty){
+      Try( s"python vol.py --conf-file=user_config.txt yarascan -y $userFileName".!!.trim )
+        .getOrElse("Nothing found.")
+    }else{
+      Try( s"python vol.py -f $memFile --profile=$os yarascan -y $userFileName".!!.trim )
+        .getOrElse("Nothing found.")
+    }
+
+    parseYaraString(str)
+  } // END checkUserYara()
 
   private[this] def runIp(memFile: String, os: String,  kdbg: String, info: Vector[(String, String)], pids: Vector[String]) = {
 
@@ -700,12 +728,11 @@ object AutomateYara extends VolParse with SearchRange {
 
   /** Find suspicious string. */
   private[this] def findSuspStrings(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
-    var str = ""
-    if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y suspicious_strings.yar".!!.trim )
+    val str = if(kdbg.nonEmpty){
+      Try( s"python vol.py --conf-file=user_config.txt yarascan -y suspicious_strings.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y suspicious_strings.yar".!!.trim )
+      Try( s"python vol.py -f $memFile --profile=$os yarascan -y suspicious_strings.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -715,12 +742,11 @@ object AutomateYara extends VolParse with SearchRange {
   /** Run scan to look for malware */
   private[this] def checkForMal1(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
 
-    var str = ""
-    if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule1.yar".!!.trim )
+    val str = if(kdbg.nonEmpty){
+       Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule1.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule1.yar".!!.trim )
+      Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule1.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -729,12 +755,11 @@ object AutomateYara extends VolParse with SearchRange {
 
   /** Run scan to look for malware */
   private[this] def checkForMal2(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
-    var str = ""
-    if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule2.yar".!!.trim )
+    val str = if(kdbg.nonEmpty){
+       Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule2.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule2.yar".!!.trim )
+       Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule2.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -744,12 +769,11 @@ object AutomateYara extends VolParse with SearchRange {
   /** Run scan to look for malware */
   private[this] def checkForMal3(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
 
-    var str = ""
-    if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule3.yar".!!.trim )
+    val str = if(kdbg.nonEmpty){
+       Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule3.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
+      Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -758,12 +782,11 @@ object AutomateYara extends VolParse with SearchRange {
 
   /** Run scan to look for malware */
   private[this] def checkForMal4(memFile: String, os: String, kdbg: String): Vector[YaraParseString] = {
-    var str = ""
-    if(kdbg.nonEmpty){
-      str = Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule3.yar".!!.trim )
+    val str = if(kdbg.nonEmpty){
+      Try( s"python vol.py --conf-file=user_config.txt yarascan -y malware_rule3.yar".!!.trim )
         .getOrElse("Nothing found.")
     }else{
-      str = Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
+      Try( s"python vol.py -f $memFile --profile=$os yarascan -y malware_rule3.yar".!!.trim )
         .getOrElse("Nothing found.")
     }
 
@@ -834,7 +857,11 @@ object AutomateYara extends VolParse with SearchRange {
     }
 
 
-    val parseExploits = parseYaraResults(str, "Exploit Kit Signatures").sortBy(_.owner)
+    val parseExploits = if(str.nonEmpty){
+      parseYaraResults(str, "Exploit Kit Signatures").sortBy(_.owner)
+    } else {
+      Vector(YaraParse("", "", "", ""))
+    }
 
     return parseExploits
   } // END findExploitKits()
@@ -875,7 +902,10 @@ object AutomateYara extends VolParse with SearchRange {
         .getOrElse("Nothing found.")
     }
 
-    val malDocsParsed = parseYaraResults(str, "Malicious Documents").sortBy(_.owner)
+    val malDocsParsed = if(str.nonEmpty)
+      parseYaraResults(str, "Malicious Documents").sortBy(_.owner)
+    else
+    Vector(YaraParse("Malicious Documents", "", "", ""))
 
     return malDocsParsed
   } // END findMalDocs()
@@ -890,7 +920,10 @@ object AutomateYara extends VolParse with SearchRange {
         .getOrElse("Nothing found.")
     }
 
-    val shellsParsed = parseYaraResults(str, "Webshells").sortBy(_.owner)
+    val shellsParsed = if(str.nonEmpty)
+      parseYaraResults(str, "Webshells").sortBy(_.owner)
+    else
+      Vector(YaraParse("Webshells", "", "", ""))
 
     return shellsParsed
   } // END findWebshells()
@@ -1436,12 +1469,6 @@ object DllScan extends VolParse {
 
     return hexRange
   } // END locateDll()
-
-  /************************************************************************
-    ***********************************************************************
-    * THIS NEEDS TO BE CHANGED BASED ON WINDOWS XP VERSUS WINDOWS 7!!!!!
-    ***********************************************************************
-    ***********************************************************************/
 
   /** Find DLL memory location ranges.  */
   private[this] def locateDll7(pid: String, dllWithRemoveIAT: Vector[String], hid: Boolean): Vector[DllHexInfo] = {
