@@ -67,11 +67,12 @@ import scala.util.Try
 final case class Configuration(memFile: String,
                                os: String,
                                kdbg: String,
-                               dump: Boolean,
+                               dump: Boolean = false,
                                yara1: String = "",
                                yara2: String = "",
                                yara3: String = "",
                                yara4: String = "",
+                               projectName: String = "", // Need to double check config file code.
                                verbose: Boolean = false)
 
 object VolatilityIDS extends FileFun {
@@ -117,7 +118,6 @@ object VolatilityIDS extends FileFun {
       System.exit( 1 )
     }
 
-
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
     val dumpDir = mkDir( memFile )
 
@@ -140,7 +140,7 @@ object VolatilityIDS extends FileFun {
     val netConns = discoveryResult.net._1
 
     /** Examine individual processes */
-    val processDiscovery = ProcessDiscoveryWindows.run(memFile, os, kdbg, process, netConns)
+    val processDiscovery = ProcessDiscoveryWindows.run(memFile, os, kdbg, process, netConns, userYaraRules)
 
     /** Search for hidden executables. */
     // val hiddenExecs = findHiddenExecs(process)
@@ -287,9 +287,34 @@ object VolatilityIDS extends FileFun {
       ""
     }
 
-    if ( memFile.nonEmpty && os.nonEmpty ) {
+    val verbosity = if(Try(splitUp(3)(0).trim.toLowerCase()).getOrElse("") == "verbose") {
+      Try(splitUp(3)(1).trim).getOrElse("")
+    } else if (Try(splitUp(2)(0).trim.toLowerCase()).getOrElse("")  == "verbose") {
+      Try(splitUp(2)(1).trim).getOrElse("")
+    } else if (Try(splitUp(4)(0).trim.toLowerCase()).getOrElse("")  == "verbose") {
+      Try(splitUp(4)(1).trim).getOrElse("")
+    } else if (Try(splitUp(5)(0).trim.toLowerCase()).getOrElse("")  == "verbose") {
+      Try(splitUp(5)(1).trim).getOrElse("")
+    } else if (Try(splitUp(6)(0).trim.toLowerCase()).getOrElse("")  == "verbose") {
+      Try(splitUp(6)(1).trim).getOrElse("")
+    }else if(Try(splitUp(7)(0).trim.toLowerCase()).getOrElse("")  == "verbose"){
+      Try(splitUp(7)(1).trim).getOrElse("")
+    }else if (Try(splitUp(8)(0).trim.toLowerCase()).getOrElse("")  == "verbose") {
+      Try(splitUp(8)(1).trim).getOrElse("")
+    }else if(Try(splitUp(9)(0).trim.toLowerCase()).getOrElse("")  == "verbose"){
+      Try(splitUp(9)(1).trim).getOrElse("")
+    }else{
+      ""
+    }
+
+    val verbose = if (verbosity.nonEmpty){
+      if (verbosity == "true") true
+      else false
+    } else false
+
+    if ( memFile.nonEmpty || os.nonEmpty ) {
       println( "\n\nWelcome to the Big Brain Security Volatile IDS! \n" +
-        "\nThe configuration file was successfully read...\n\nRunning the program..." )
+        s"\nThe configuration file for $memFile was successfully read...\n\nRunning the program..." )
     }  else {
       println("The program could not find a profile or memory file name in bbs_config.txt.")
       println("Please update the bbs_config.txt file in your volatility directory.")
@@ -297,7 +322,7 @@ object VolatilityIDS extends FileFun {
       System.exit( 1 )
     }
 
-    return Configuration(memFile, os, kdbg, dump, yaraRule1, yaraRule2, yaraRule3, yaraRule4)
+    return Configuration(memFile, os, kdbg, dump, yaraRule1, yaraRule2, yaraRule3, yaraRule4, projectName, verbose)
   } // END parseConfig()
 /*
   /**
@@ -423,21 +448,23 @@ object VolatilityIDS extends FileFun {
   private[windows] def mkDir(memFile: String): String = {
     val cal = Calendar.getInstance()
     val date = {
-      cal.get(Calendar.MONTH) + "-" + cal.get(Calendar.DATE) + "_" + cal.get(Calendar.HOUR) + cal.get(Calendar.MINUTE)
+      cal.get(Calendar.MONTH) + "-" + cal.get(Calendar.DATE) + "_" + cal.get(Calendar.HOUR)
     }
-    val dirName = System.getProperty("user.dir") + "/" + memFile + date
+    val memNoExt = memFile.splitLast('.')(0)
+
+    val dirName = System.getProperty("user.dir") + "/" + "BBS_Reports" + "/" + memNoExt + "_" + date
     val dir = new File(dirName)
     // val checkCreation: Boolean = dir.mkdir()
 
-    if(dir.mkdir()){
+    if(dir.mkdirs()){
       println(s"Log files, prefetch files, mft, and pcaps will be located in the following directory:\n$dirName")
     } else{
       println("\n\n\nWe failed to create a directory for lots of helpful information. Check and make sure\n" +
         s"the directory $dirName doesn't already exist.\n\n")
     }
-    val shortDirName = memFile + date
+    val shortDirName = memNoExt + "_" + date
 
-    return shortDirName
+    return dirName
   } // END mkDir()
 
   /** Determines where output will be stored. */
