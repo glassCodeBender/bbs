@@ -1,8 +1,7 @@
 package com.bbs.vol.utils
-
 import java.io.{BufferedWriter, File, FileWriter, PrintWriter}
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 
 import io.Source
 
@@ -49,7 +48,7 @@ trait FileFun {
   } // END appendToFile()
 
   /**
-    * Read a file and tranform or filter it
+    * Read a file and transform or filter it
     * Use readFileTransform("filename.txt")(x => x.toLowerCase)
     */
   private[vol] def readFileTransform(fileName: String)(f: Iterator[String] => Iterator[String]): Vector[String] = {
@@ -69,8 +68,18 @@ trait FileFun {
 
   /** Move a single file to a different directory. */
   private[vol] def moveFile(file: String, dest: String) = {
+    // import java.io.IOException
+    import java.nio.file.Files
+    // import java.nio.file.Path
+    import java.nio.file.Paths
 
-    Files.move(Paths.get(file), Paths.get(dest), REPLACE_EXISTING)
+      val fileToMovePath = Files.createFile(Paths.get(file))
+      val targetPath = Paths.get(dest)
+    
+      Files.move(fileToMovePath, targetPath.resolve(fileToMovePath.getFileName))
+
+   // val src = new Path(file)
+   //  Files.move(Paths.get(file), Paths.get(dest), StandardCopyOption.REPLACE_EXISTING)
 
   }// END run()
 
