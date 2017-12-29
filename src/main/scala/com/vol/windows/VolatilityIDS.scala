@@ -49,19 +49,15 @@ package com.bbs.vol.windows
   * ** Extract DNS cache (340)
   */
 
-import scala.io.Source
 import sys.process._
 import java.io.File
 import java.util.Calendar
 
-import com.bbs.vol.processtree._
-import com.bbs.vol.utils.FileFun
+import com.bbs.vol.utils.{CleanUp, FileFun}
 
 import scala.collection.immutable.TreeMap
 import com.bbs.vol.windows.StringOperations._
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
 final case class Configuration(memFile: String,
@@ -121,8 +117,14 @@ object VolatilityIDS extends FileFun {
     /** Make a directory to store log, prefetch, and pcap output as txt by volatility */
     val dumpDir = mkDir( memFile )
 
+    /** Create object that we'll use for cleaning up the volatility directory. */
+    val cleanUpObj = new CleanUp(dumpDir)
+
+    /** Create the directories that we'll store lots of helpful stuff in. */
+    cleanUpObj.prepForMove
+
     /** Broadly examine image for malicious behavior. */
-    val discoveryResult: Discovery = VolDiscoveryWindows.run( memFile, os, kdbg, dumpDir )
+    val discoveryResult: Discovery = VolDiscoveryWindows.run( memFile, os, kdbg, cleanUpObj )
 
     /** discoveryResult Contains:
       *
@@ -462,7 +464,7 @@ object VolatilityIDS extends FileFun {
       println("\n\n\nWe failed to create a directory for lots of helpful information. Check and make sure\n" +
         s"the directory $dirName doesn't already exist.\n\n")
     }
-    val shortDirName = memNoExt + "_" + date
+    // val shortDirName = memNoExt + "_" + date
 
     return dirName
   } // END mkDir()
