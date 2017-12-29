@@ -94,13 +94,13 @@ object CreateReport extends FileFun {
     /**Rootkits Found */
     val rootkitInfo = rootkitCheck(rootkit)
 
-    report.append(rootkitInfo)
+    report.append(intro + "\n" + rootkitInfo + "\n\n")
 
     /** Yara malware findings */
     val malware: String = malwareFound(yaraObj)
 
     if(malware.nonEmpty)
-      report.append(intro +  "Malware Found:\n\n")
+      report.append("\n\n" +  "Malware Found:\n\n")
 
     report.append(malware)
     report.append("SIGNIFICANT FINDINGS:\n\n")
