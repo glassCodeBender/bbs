@@ -1,13 +1,15 @@
 package com.bbs.vol.windows
 
 import StringOperations._
-import com.bbs.vol.utils.{CaseTransformations, SearchRange}
+import com.bbs.vol.utils.{CaseTransformations, CleanUp, FileFun, SearchRange}
 import com.bbs.vol.httpclient.{PageInfo, WhoIs}
 import java.io.File
 
 import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
 import scala.util.Try
+import com.bbs.vol.windows.StringOperations._
+import com.bbs.vol.windows.VolDiscoveryWindows.writeToFile
 
 // import scala.collection.mutable
 import sys.process._
@@ -132,13 +134,13 @@ final case class ProcessBbs( pid: String,
   ***************************************************/
 
 /********************** AutomateVolDiscoveryWindows object ***********************/
-object VolDiscoveryWindows extends VolParse {
+object VolDiscoveryWindows extends VolParse with FileFun {
 
   /**
     * This is the functional main method for performing our initial
     * volatility scans. Based on these results, we'll perform more scans.
     */
-  private[windows] def run(memFile: String, os: String, kdbg: String, dump: String ): Discovery = {
+  private[windows] def run(memFile: String, os: String, kdbg: String, cleanUp: CleanUp ): Discovery = {
 
     /************************ PERFORM VOLATILITY SCANS **************************/
 
@@ -146,7 +148,7 @@ object VolDiscoveryWindows extends VolParse {
     //val initialScan: InitialScanResults = InitialScan.run(os, memFile)
 
     /** Contains Vector of processes and a ProcessBbs Tree */
-    val processScanResults: (Vector[ProcessBbs], String) = ProcessBbsScan.run(memFile, os, kdbg)
+    val processScanResults: (Vector[ProcessBbs], String) = ProcessBbsScan.run(memFile, os, kdbg, cleanUp)
 
 
     // val testGetParents = processScanResults._1
@@ -177,15 +179,15 @@ object VolDiscoveryWindows extends VolParse {
     /***************************
       * THIS NEEDS TO BE FIXED.
       **************************/
-   val shimCache = shimCacheEntries(memFile, os, kdbg)
+   val shimCache = shimCacheEntries(memFile, os, kdbg, cleanUp)
 
     println("\n\nExtracting Event Logs...")
-    extractEVT(memFile, os, kdbg, dump)
+    extractEVT(memFile, os, kdbg, cleanUp.destination)
     println("\n\nEvent logs successfully extracted.\n\nExtracting Master File Table...\n")
-    val mftFilename = extractMFT(memFile, os, kdbg, dump)
+    val mftFilename = extractMFT(memFile, os, kdbg, cleanUp.destination)
 
     println("\n\nAnalyzing Windows services and gathering information about system state...\n")
-    val sysState: SysState = SysStateScan.run(memFile, os, kdbg)
+    val sysState: SysState = SysStateScan.run(memFile, os, kdbg, cleanUp)
 
     /** Returns a Discovery case class */
     Discovery(processScanResults, sysState, netScanResult, rootkitHunt,
@@ -200,8 +202,10 @@ object VolDiscoveryWindows extends VolParse {
     val dir = new File(mftDir)
     dir.mkdir()
 
+    val shortMemFileName = memFile.splitLast('.')(0)
+
     // val csvFileName = memFile + Calendar.HOUR + "-" + Calendar.MINUTE + ".csv"
-    val mftFileName: String = memFile + "_MFT" + ".body"
+    val mftFileName: String = shortMemFileName + "_MFT" + ".body"
     // Outputting MFT as body file so it's easily parsed w/ sleuthkit
 
     if(kdbg.nonEmpty) {
@@ -243,13 +247,15 @@ object VolDiscoveryWindows extends VolParse {
     * == Should also check for timestomping in registry
     */
 
-  private[this] def shimCacheEntries(memFile: String, os: String, kdbg: String): String = {
+  private[this] def shimCacheEntries(memFile: String, os: String, kdbg: String, cleanUp: CleanUp) : String = {
 
     val shimcache = if(kdbg.nonEmpty){
       Try( s"python vol.py --conf-file=user_config.txt shimcache".!!.trim ).getOrElse("")
     }else {
       Try(s"python vol.py -f $memFile --profile=$os shimcache".!!.trim).getOrElse("")
     }
+    writeToFile("shimcache_" + memFile, shimcache)
+    cleanUp.mvFileScans("shimcache_" + memFile)
 
     /*
     val shimCacheVec = parseOutputDashVec(shimcache)
@@ -280,10 +286,10 @@ object VolDiscoveryWindows extends VolParse {
 // case class RepeatFiles(malwareFound: Boolean, process: String, repeated: Vector[String])
 
 
-object ProcessBbsScan extends VolParse with CaseTransformations {
+object ProcessBbsScan extends VolParse with CaseTransformations with FileFun {
 
   /** Functional main method of ProcessBbsScan object */
-  private[windows] def run( memFile: String, os: String, kdbg: String ): (Vector[ProcessBbs], String) = {
+  private[windows] def run( memFile: String, os: String, kdbg: String, cleanUp: CleanUp ): (Vector[ProcessBbs], String) = {
 
     println("\nRunning psscan...\n")
     /** Returns Tuple with a map of pid -> info about processes and info about repeatFiles */
@@ -293,7 +299,7 @@ object ProcessBbsScan extends VolParse with CaseTransformations {
     val psList: Vector[ProcessBbs] = psListScan(memFile, os, kdbg)
     val psListPid = psList.map(x => x.pid)
     // val psxviewResult: Vector[Vector[String]] = psxScan(memFile, os)
-    val psTreeResult: String = psTreeScan(memFile, os, kdbg)
+    val psTreeResult: String = psTreeScan(memFile, os, kdbg, cleanUp)
 
     /** Filter psxviewResult to only those w/ matching PIDs in psscan */
     val shouldBeFalse: Vector[ProcessBbs] = {
@@ -603,6 +609,7 @@ object ProcessBbsScan extends VolParse with CaseTransformations {
     else true
   } // END allNumbers
   */
+  /*
   /**
     * psxScan()
     * Does psxScan and finds hidden processes and possibly hidden processes
@@ -679,8 +686,8 @@ object ProcessBbsScan extends VolParse with CaseTransformations {
 
     return filterPsx
   } // psxScan
-
-  private[this] def psTreeScan(memFile: String, os: String, kdbg: String): String = {
+*/
+  private[this] def psTreeScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): String = {
 
     println("\n\nRunning pstree scan...\n\n")
 
@@ -691,8 +698,14 @@ object ProcessBbsScan extends VolParse with CaseTransformations {
       Try( s"python vol.py -f $memFile --profile=$os pstree".!!.trim )
         .getOrElse("pstree scan failed...\n\nIt is likely that something is wrong with your settings.\n\n")
     }
+  val outputFile = "pstree_" + memFile.splitLast('.')(0)
 
-    println("\n\nPrinting pstree scan...\n\n")
+  // writeToFile(outputFile , pstree)
+  // cleanUp.mvFileScans(outputFile)
+
+  cleanUp.writeAndMoveScans(outputFile, pstree)
+
+  println("\n\nPrinting pstree scan...\n\n")
     println(pstree)
 
     return pstree
@@ -758,6 +771,7 @@ object NetScan extends VolParse with SearchRange {
 
     /** Decide which Information we return conn or netScan */
     if(conn.nonEmpty){
+
       // The output could probably be saved in a Map[Int, String] with the PID as the key
       val (conns, outsideConns): (Vector[NetConnections], Vector[String]) = connScan(conn)
 
@@ -948,9 +962,9 @@ object NetScan extends VolParse with SearchRange {
 object SysStateScan extends VolParse {
 
   /** A lot more could be done with this section. Especially for the services scan. */
-  private[windows] def run( memFile: String, os: String, kdbg: String): SysState = {
+  private[windows] def run( memFile: String, os: String, kdbg: String, cleanUp: CleanUp): SysState = {
 
-    val (svcOnePerLine, svcStopped) = svcScan(memFile, os, kdbg)
+    val (svcOnePerLine, svcStopped) = svcScan(memFile, os, kdbg, cleanUp)
 
     /** A lot of commands could be added to the suspicious commands. The full output is probably enough though. */
     val (fullConsoles, suspiciousCmds) = consoles(memFile, os, kdbg)
@@ -984,7 +998,7 @@ object SysStateScan extends VolParse {
     */
 
   /** All the service scan related stuff runs out of this method. */
-  private[this] def svcScan(memFile: String, os: String, kdbg: String): (Vector[String], ArrayBuffer[String]) = {
+  private[this] def svcScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): (Vector[String], ArrayBuffer[String]) = {
     // locate windows service records
     println("\n\nRunning svcscan...\n\n")
 
@@ -1000,7 +1014,7 @@ object SysStateScan extends VolParse {
     val svcOneLine: ArrayBuffer[String] = svcParse(svcLines)
 
     /** If this list is not empty, it's likely that someone is using malicious services. */
-    val stoppedSvc: ArrayBuffer[String] = stoppedSvcs(svcOneLine)
+    val stoppedSvc: ArrayBuffer[String] = stoppedSvcs(svcOneLine, cleanUp)
 
     /** Need to grab */
 
@@ -1042,7 +1056,7 @@ object SysStateScan extends VolParse {
     */
 
   /** Finds suspicious services that an adversary potentially stopped */
-  private[this] def stoppedSvcs(arr: ArrayBuffer[String]): ArrayBuffer[String] = {
+  private[this] def stoppedSvcs(arr: ArrayBuffer[String], cleanUp: CleanUp) : ArrayBuffer[String] = {
 
     /** A list of services that are suspicious if stopped. A lot could be added to list. AV vendors especially */
     val svcs = Vector("Wscsvc", "Wuauserv", "BITS", "WinDefend", "WerSvc")
@@ -1059,6 +1073,8 @@ object SysStateScan extends VolParse {
 
     println("\n\nPrinting Stopped Services Found: \n\n")
     stoppedSvcs.foreach(println)
+    /** Write all services that were stopped to directory. */
+    cleanUp.writeAndMoveScans("stopped_services", foundSvcs.map(x => x.split('|').mkString).mkString("\n"))
 
     /** Convert the services back to a readable format */
     val convertStopped = convertBack(foundSvcs)
@@ -1679,6 +1695,7 @@ object RemoteMappedDriveSearch extends VolParse {
       symParsed.getOrElse(Vector[String]()).map(x => symLinkPattern.findFirstIn(x))
     }
     val map = mutable.Map[String, String]()
+
 
     var i = 0
     while(i < timeResult.length){
