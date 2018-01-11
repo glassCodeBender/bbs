@@ -1,7 +1,6 @@
 package com.bbs.vol.windows
 
 import java.math.BigInteger
-
 import StringOperations._
 import com.bbs.vol.utils.SearchRange
 
