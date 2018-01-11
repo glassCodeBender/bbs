@@ -55,6 +55,7 @@ class CleanUp(dest: String) extends FileFun {
 
   /** move a single file to Full_Scans directory */
   private[vol] def mvFileScans(file: String) = {
+
     moveFile(file, dest + "/Full_Scans")
   } // END mvFileScans()
 
