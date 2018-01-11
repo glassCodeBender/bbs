@@ -10,6 +10,8 @@ This program also uses a ton of people's yara rules. I'm not going to name them,
 
 Open Source Software is so AWESOME!!! 
 
+See INSTALLATIONINSTRUCTIONS.txt for information on compiling the program. 
+
 # Important Information
 
 IMPORTANT: If you want to use this program, you need to fix the directory structure of change the packages. I'm not very good with github so I don't know how to change directory structures on here.
