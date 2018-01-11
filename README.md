@@ -1,5 +1,7 @@
 # BBS Volatile IDS
 
+NOTE: I added a fatal bug to the program a couple weeks ago. The bug is now fixed, but the program is still not done. I'm hoping version 1.0 will be complete this week. 
+
 BBS Volatile IDS looks through memory dumps for malware and prints an easy to read report about the memory dump. According to a malware expert from the NSA, the program catches over 95% of malware. The 5% of malware that the program does not immediately catch can be found by looking at suspicious indicators in the report and examining the memory dump based on what you find.
 
 This program uses the Volatility Framework. Without the people that contributed in developing Volatility, I could have never written this program. I didn't do the hard work, they did. All I did was run their programs and parse the data (after intensely reading a very large intimidating book "The Art of Memory Forensics"). You would not believe how much work the people at Volatility (I think one of the guys worked at Google) did to make this program possible. I am a very basic programmer. The only reason this program is good is because I used other people's YEARS of work. That's the best thing about programming, all you have to do is find someone better than you and use their work. Seriously... there are probably 100 people that have contributed to volatility. The vast majority of this program was not written by me.
