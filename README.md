@@ -1,6 +1,6 @@
 # BBS Volatile IDS
 
-NOTE: I added a fatal bug to the program a couple weeks ago. The bug is now fixed, but the program is still not done. I'm hoping version 1.0 will be complete this week. I am a full time student and I work 19 hours a week. Once I get all the bugs worked out, I'll probably upload a version of the program with the correct directory structure.
+NOTE: I added a fatal bug to the program a couple weeks ago. The bug is now fixed, but the program is still not done. I'm hoping version 1.0 will be complete this week. I am a full time student, and I work 19 hours a week. Once I get all the bugs worked out, I'll probably upload a version of the program with the correct directory structure.
 
 BBS Volatile IDS looks through memory dumps for malware and prints an easy to read report about the memory dump. According to a malware expert from the NSA, the program catches over 95% of malware. The 5% of malware that the program does not immediately catch can be found by looking at suspicious indicators in the report and examining the memory dump based on what you find.
 
@@ -44,7 +44,7 @@ DISTANT FUTURE:
 - A basic GUI so users can determine the volatility directory, the memory dump, the os version, and the kdbg. 
 
 CURRENT ISSUES:
-- I never ended re-fixed connscan so Windows XP and Server 2003 won't parse correctly. (It used to work back when I only included the destination IP addresses. I haven't tested the updated style of parsing when looking for IP addresses in DLL ranges with yara).
+- I never re-fixed connscan so Windows XP and Server 2003 won't parse correctly. (It used to work back when I only included the destination IP addresses. I haven't tested the updated style of parsing when looking for IP addresses in DLL ranges with yara).
 - There's a bug with exploitkits_rules.yar results parsing. I'll fix it soon probably. 
 - The risk rating sucks so I'm not going to use it until it's fixed.
 - The directory structure on github is not the same as my directory structure on my computer.
