@@ -1,6 +1,6 @@
 package com.bbs.vol.windows
 
-import StringOperations._
+// import StringOperations._
 import com.bbs.vol.utils.{CaseTransformations, CleanUp, FileFun, SearchRange}
 import com.bbs.vol.httpclient.{PageInfo, WhoIs}
 import java.io.File
@@ -9,7 +9,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
 import scala.util.Try
 import com.bbs.vol.windows.StringOperations._
-import com.bbs.vol.windows.VolDiscoveryWindows.writeToFile
+// import com.bbs.vol.windows.VolDiscoveryWindows.writeToFile
 
 // import scala.collection.mutable
 import sys.process._
@@ -171,7 +171,7 @@ object VolDiscoveryWindows extends VolParse with FileFun {
     println("\n\nPrinting remote mapped drives found...\n\n")
     Try(remoteMapped.foreach(println)).getOrElse(println("Failed to print remote mapped drives..."))
 
-    val rootkitHunt = RootkitDetector.run(memFile, os, kdbg)
+    val rootkitHunt = RootkitDetector.run(memFile, os, kdbg, cleanUp)
 
     // Contains suspicious SIDs and suspicious usernames
    // val suspiciousSIDs: mutable.Map[String, String] = DetectLateralMovement.run(memFile, os)
@@ -254,8 +254,11 @@ object VolDiscoveryWindows extends VolParse with FileFun {
     }else {
       Try(s"python vol.py -f $memFile --profile=$os shimcache".!!.trim).getOrElse("")
     }
-    writeToFile("shimcache_" + memFile, shimcache)
-    cleanUp.mvFileScans("shimcache_" + memFile)
+
+    val outputFile = "shimcache_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveScans(outputFile, shimcache))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
 
     /*
     val shimCacheVec = parseOutputDashVec(shimcache)
@@ -319,7 +322,7 @@ object ProcessBbsScan extends VolParse with CaseTransformations with FileFun {
     /** I could use distinct here, but I was too excited about distinctBy to not use it. */
     val distinctProcess = distinctBy(procVector)(_.pid)
 
-    println("Printing cleaned up process list results...\n\n")
+    println("\nPrinting cleaned up process list results...\n\n")
     distinctProcess.foreach(println)
 
     return (distinctProcess, psTreeResult)
@@ -698,12 +701,12 @@ object ProcessBbsScan extends VolParse with CaseTransformations with FileFun {
       Try( s"python vol.py -f $memFile --profile=$os pstree".!!.trim )
         .getOrElse("pstree scan failed...\n\nIt is likely that something is wrong with your settings.\n\n")
     }
-  val outputFile = "pstree_" + memFile.splitLast('.')(0)
+  val outputFile = "pstree_" + memFile.splitLast('.')(0) + ".txt"
 
   // writeToFile(outputFile , pstree)
   // cleanUp.mvFileScans(outputFile)
 
-  cleanUp.writeAndMoveScans(outputFile, pstree)
+  Try(cleanUp.writeAndMoveScans(outputFile, pstree)).getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
 
   println("\n\nPrinting pstree scan...\n\n")
     println(pstree)
@@ -1074,7 +1077,7 @@ object SysStateScan extends VolParse {
     println("\n\nPrinting Stopped Services Found: \n\n")
     stoppedSvcs.foreach(println)
     /** Write all services that were stopped to directory. */
-    cleanUp.writeAndMoveScans("stopped_services", foundSvcs.map(x => x.split('|').mkString).mkString("\n"))
+    cleanUp.writeAndMoveScans("stopped_services.txt", stoppedSvcs.map(x => x.split('|').mkString).mkString("\n"))
 
     /** Convert the services back to a readable format */
     val convertStopped = convertBack(foundSvcs)
@@ -1250,10 +1253,10 @@ object RootkitDetector extends VolParse {
     * @param memFile
     * @param os
     */
-  private[windows] def run(memFile: String, os: String, kdbg: String): RootkitResults = {
+  private[windows] def run(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): RootkitResults = {
 
     /** Returns hidden modules found and result of modscan - (hiddenModules, modscanResults) */
-    val hiddenModules: (Vector[String], String) = findHiddenModules(memFile, os, kdbg)
+    val hiddenModules: (Vector[String], String) = findHiddenModules(memFile, os, kdbg, cleanUp)
 
     if(hiddenModules._1.nonEmpty) println("Printing hidden modules:\n")
     hiddenModules._1.foreach(println)
@@ -1265,14 +1268,14 @@ object RootkitDetector extends VolParse {
 
     println("\nPrinting unknown kernel Modules if found:\n")
     if(callbacks._1.isEmpty){
-      println("No unknown kernel modules found...\n\n")
+      println("\n\nNo unknown kernel modules found...\n\n")
     } else{
       callbacks._1.foreach(println)
     }
     if(callbacks._2.isEmpty){
-      println("No APIs commonly used by rootkits were found on system\n\n")
+      println("\n\nNo APIs commonly used by rootkits were found on system\n\n")
     }else{
-      println("The following calls to APIs commonly used by rootkits were found:\n\n")
+      println("\n\nThe following calls to APIs commonly used by rootkits were found:\n\n")
       callbacks._2.foreach(println)
     }
 
@@ -1331,12 +1334,12 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return (Vector[String], Vector[String]) - (hiddenModules, completeModScan)
     */
-  private[this] def findHiddenModules(memFile: String, os: String, kdbg: String): (Vector[String], String) = {
+  private[this] def findHiddenModules(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): (Vector[String], String) = {
 
     /** Look for loaded modules */
     val modules = modulesScan(memFile, os, kdbg)
     /** modscan contains hidden modules (_.1 = full scan, _.2 = names of modules) */
-    val modScanResult: (String, Vector[String]) = modScan(memFile, os, kdbg)
+    val modScanResult: (String, Vector[String]) = modScan(memFile, os, kdbg, cleanUp)
     /** Look for unloaded modules */
     val unloadedModules: Vector[String] = unloadedModulesScan(memFile, os, kdbg)
 
@@ -1383,7 +1386,7 @@ object RootkitDetector extends VolParse {
     * @param os
     * @return
     */
-  private[this] def modScan(memFile: String, os: String, kdbg: String): (String, Vector[String]) = {
+  private[this] def modScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): (String, Vector[String]) = {
 
     /** I'd really like this scan to return the results of it's general scan also! */
 
@@ -1392,6 +1395,13 @@ object RootkitDetector extends VolParse {
       }else{
         Try( s"python vol.py -f $memFile --profile=$os modscan".!!.trim ).getOrElse("")
       }
+
+
+    val outputFile = "modscan_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveScans(outputFile, modScan))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
+
 
     val modules: Option[Vector[String]] = parseOutputDashVec(modScan)
     val modulesParsed: Vector[Vector[String]] = {
@@ -1545,7 +1555,7 @@ object RootkitDetector extends VolParse {
 
         /** Check if address locations are the same. */
         if(firstAddress != secondAddress){
-          println("Inline Hook Rootkit Found")
+          println("\n\nInline Hook Rootkit Found!!\n\n")
           inlineHookFound = true
         }
 
