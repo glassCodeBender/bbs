@@ -1,6 +1,6 @@
 # BBS Volatile IDS
 
-NOTE: I added a fatal bug to the program a couple weeks ago. The bug is now fixed, but the program is still not done. I'm hoping version 1.0 will be complete this week. 
+NOTE: I added a fatal bug to the program a couple weeks ago. The bug is now fixed, but the program is still not done. I'm hoping version 1.0 will be complete this week. I am a full time student and I work 19 hours a week. Once I get all the bugs worked out, I'll probably upload a version of the program with the correct directory structure.
 
 BBS Volatile IDS looks through memory dumps for malware and prints an easy to read report about the memory dump. According to a malware expert from the NSA, the program catches over 95% of malware. The 5% of malware that the program does not immediately catch can be found by looking at suspicious indicators in the report and examining the memory dump based on what you find.
 
