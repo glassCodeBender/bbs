@@ -34,6 +34,11 @@ class CleanUp(dest: String) extends FileFun {
     mvFileScans(outputFile)
   }
 
+  private[vol] def writeAndMoveReport(outputFile: String, report: String) = {
+    writeToFile(outputFile, report)
+    moveFile(report, outputFile)
+  }
+
   /** Move a data structure of files to Dumps directory. */
   private[vol] def mvSeqToDumps(files: Seq[String]) = {
 
