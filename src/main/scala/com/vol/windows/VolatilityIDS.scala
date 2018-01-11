@@ -153,11 +153,15 @@ object VolatilityIDS extends FileFun {
     /** Need to write extract parts of Discovery (proc), and pass it to next section of program. */
 
     /** Write report */
-    CreateReport.run(memFile, os, processDiscovery, discoveryResult, riskRating)
+    CreateReport.run(memFile, os, processDiscovery, discoveryResult, riskRating, cleanUpObj)
 
     println("\n\nReport written successfully...\n\n")
+
+    println("\n\nRunning a few extra scans that will be written to directly to disk\n\n")
+    ExtraScans.run(memFile, os, kdbg, cleanUpObj)
     /** Do scans not included w/ report and send to file. */
 
+    println("\n\nProgram complete!\n\n")
     // envars
     // extra yara scans
 
@@ -1084,7 +1088,16 @@ object FindSuspiciousProcesses {
 
 } // END FindSuspiciousProcesses object
 
-object ExtraScans {
+object ExtraScans extends FileFun {
+
+  private[windows] def run(memFile: String, os: String, kdbg: String, cleanUp: CleanUp) = {
+    autorunsScan(memFile, os, kdbg, cleanUp)
+    extraExtras(memFile, os, kdbg, cleanUp)
+    envScan(memFile, os, kdbg, cleanUp)
+    deviceTreeScan(memFile, os, kdbg, cleanUp)
+    hollowfindScan(memFile, os, kdbg, cleanUp)
+
+  } // END run()
 
   private[this] def sysRegistryCheckXP(memFile: String, os: String, kdbg: String): Vector[String] = {
 
@@ -1128,56 +1141,107 @@ object ExtraScans {
     return Vector(run, runOnce)
   } // END userRegistryCheckXP()
 
-  def extraExtras(memFile: String, os: String) = {
+  private[this] def extraExtras(memFile: String, os: String, kdbg: String, cleanUp: CleanUp) = {
 
     // Run mandiant redline against memory dump also.
 
     /** Filename for timeliner */
-    val timelinerName = memFile + "_timeliner.txt"
+    val timelinerName = "timeliner_" + memFile.splitLast('.')(0) + ".body"
 
-    val batch1 = "mactime -b timeliner2.txt -d > .csv"
-    val timeliner = s"python vol.py --conf-file=user_config.txt timeliner --output=body --output-file=$timelinerName"
+    // val batch1 = "mactime -b timeliner2.txt -d > .csv"
+    if(kdbg.nonEmpty){
+      Try(s"python vol.py --conf-file=user_config.txt timeliner --output=body --output-file=$timelinerName".!)
+        .getOrElse(println("\n\nFailed to print timeliner.\n\n"))
+    }else{
+      Try(s"python vol.py -f $memFile --profile=$os timeliner --output=body --output-file=$timelinerName".!)
+        .getOrElse(println("\n\nFailed to print timeliner.\n\n"))
+    }
 
-    val dumpRegistry = "python vol.py --conf-file=user_config.txt dumpregistry --dump-dir ./registry_dump.txt"
+    moveFile(timelinerName, cleanUp.destination + "/Dumps")
 
-    val autoruns = "python vol.py --conf-file=user_config.txt autoruns -v"
+    val regName = "./regdump_" + memFile.splitLast('.')(0) + ".body"
 
-    val hollowfind = "python vol.py --conf-file=user_config.txt hollowfind"
+    if(kdbg.nonEmpty){
+      Try(s"python vol.py --conf-file=user_config.txt dumpregistry --dump-dir $regName".!)
+        .getOrElse(println("\n\nFailed to dump registry.\n\n"))
+    }else{
+      Try(s"python vol.py -f $memFile --profile=$os dumpregistry --dump-dir $regName".!)
+      .getOrElse(println("\n\nFailed to dump registry.\n\n"))
+    }
+
+    moveFile(regName, cleanUp.destination + "/Dumps")
+
+    // val dumpRegistry = "python vol.py --conf-file=user_config.txt dumpregistry --dump-dir ./registry_dump.txt"
+
+    // val autoruns = "python vol.py --conf-file=user_config.txt autoruns -v"
+
+    // val hollowfind = "python vol.py --conf-file=user_config.txt hollowfind"
 
     /** Create memory dump based on hyberfil.sys */
-    val createImage = "python vol.py imagecopy -f hiberfil.sys -O newimage.img"
+    // val createImage = "python vol.py imagecopy -f hiberfil.sys -O newimage.img"
 
-    batch1
+    // batch1
   } // END extraExtras()
 
   /***********************
     * Post report scans.
     **********************/
 
+  private[this] def autorunsScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): Unit ={
+    val auto = if(kdbg.nonEmpty){
+      Try("python vol.py --conf-file=user_config.txt autoruns -v").getOrElse("")
+    }else{
+      Try(s"python vol.py -f $memFile --profile=$os autoruns -v").getOrElse("")
+    }
+
+    val outputFile = "autoruns_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveScans(outputFile, auto))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
+
+  } // END hollowFind()
+
+  private[this] def hollowfindScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): Unit ={
+    val hollow = if(kdbg.nonEmpty){
+      Try("python vol.py --conf-file=user_config.txt hollowfind").getOrElse("")
+    }else{
+      Try(s"python vol.py -f $memFile --profile=$os hollowfind").getOrElse("")
+    }
+
+    val outputFile = "hollowfind_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveScans(outputFile, hollow))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
+
+  } // END hollowFind()
+
   /**
     *  This method throws a broken pipe exception. Probably a dependency issue.
     */
-  private[this] def deviceTreeScan(memFile: String, os: String, kdbg: String): String = {
+  private[this] def deviceTreeScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): String = {
 
     /** We want to look at network, keyboard, and disk drivers (389) Also look for unnamed devices */
-    var deviceTree = ""
-    if(kdbg.nonEmpty){
-      deviceTree = {
+    var deviceTree = if(kdbg.nonEmpty){
+
         Try( s"python vol.py --conf-file=user_config.txt devicetree".!!.trim )
           .getOrElse("There was an error while reading devicetree scan...")
-      }
+
     }else{
-      deviceTree = {
         Try( s"python vol.py -f $memFile --profile=$os devicetree".!!.trim )
           .getOrElse("There was an error while reading devicetree scan...")
       }
-    }
+
+    val outputFile = "devicetree_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveScans(outputFile, deviceTree))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
+
 
     return deviceTree
   } // END deviceTreeScan()
 
   /** Until I fully understand the output of envars module, I'm just going to return full output */
-  private[this] def envScan(memFile: String, os: String, kdbg: String): String = {
+  private[this] def envScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): Unit = {
 
     println("\n\nRunning envars scan...\n\n")
 
@@ -1193,7 +1257,14 @@ object ExtraScans {
       }
     }
 
-    return envars
+    val outputFile = "envars_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveScans(outputFile, envars))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
+
+
+
+  //  return envars
 
     /*
     /** WARNING: Check with actual output because we might not need to drop while "---" */
