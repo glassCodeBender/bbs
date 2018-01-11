@@ -3,11 +3,15 @@ package com.bbs.vol.windows
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
+import com.bbs.vol.utils.CleanUp
+
+// import com.bbs.vol.httpclient.GetDllDescription
 import com.bbs.vol.processtree._
 import com.bbs.vol.utils.FileFun
 
 import scala.collection.immutable.TreeMap
 import scala.util.Try
+import com.bbs.vol.windows.StringOperations._
 
 /**
   * TO DO:
@@ -22,6 +26,7 @@ object CreateReport extends FileFun {
                            process: ProcessBrain,
                            disc: Discovery,
                            riskRating: Int,
+                           cleanUp: CleanUp,
                            projectName: String = "") = {
 
      val beginningStr =
@@ -201,7 +206,13 @@ object CreateReport extends FileFun {
     report.append( processInfoDecorations + processInfo)
 
     /** Write Report to File */
-    writeToFile("BBS_Report_" + memFile + ".txt", report.toString)
+    // writeToFile("BBS_Report_" + memFile + ".txt", report.toString)
+
+    val outputFile = "BBS_REPORT_" + memFile.splitLast('.')(0) + ".txt"
+
+    Try(cleanUp.writeAndMoveReport(outputFile, report.toString))
+      .getOrElse(println(s"\n\nFailed to write $outputFile to file...\n\n"))
+
 
   } // END run()
 
@@ -936,7 +947,5 @@ object ProcessDescription {
 
     return result
   } // END matchProcess()
-
-
 
 } // END CreateReport
