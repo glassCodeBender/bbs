@@ -73,10 +73,11 @@ trait FileFun {
     // import java.nio.file.Path
     import java.nio.file.Paths
 
-      val fileToMovePath = Files.createFile(Paths.get(file))
-      val targetPath = Paths.get(dest)
-    
-      Files.move(fileToMovePath, targetPath.resolve(fileToMovePath.getFileName))
+    val fileToMovePath = Paths.get(file)
+    val targetPath = Paths.get(dest)
+
+
+    Files.move(fileToMovePath, targetPath.resolve(fileToMovePath.getFileName))
 
    // val src = new Path(file)
    //  Files.move(Paths.get(file), Paths.get(dest), StandardCopyOption.REPLACE_EXISTING)
