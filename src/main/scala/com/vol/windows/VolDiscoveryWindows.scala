@@ -230,14 +230,24 @@ object VolDiscoveryWindows extends VolParse with FileFun {
       * -- powershell related logs
       */
 
+    val evtDump = new File(dump + "/EVT_LOGS")
+    val evtDumpFile = new File(dump + "/EVT_LOGS")
+    evtDumpFile.mkdir()
+
     if (os.startsWith("WinXP") || os.startsWith("Win2003")) {
       // saved result is pipe separated txt file with Date/Time|Log Name| Computer Name|SID|Source|EventID|Event Type|Message
       if (kdbg.nonEmpty) {
-        Try(s"python vol.py --conf-file=user_config.txt evtlogs -v --save-evt -D $dump".!).getOrElse("")
+        Try(s"python vol.py --conf-file=user_config.txt evtlogs -v --save-evt -D $evtDump".!).getOrElse("")
       } else {
-        Try(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $dump".!).getOrElse("")
+        Try(s"python vol.py --conf-file=user_config.txt evtlogs -v --save-evt -D $evtDump".!).getOrElse("")
       }
-    }
+    }else{
+      if (kdbg.nonEmpty) {
+        Try(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $evtDump".!).getOrElse("")
+      } else {
+        Try(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $evtDump".!).getOrElse("")
+      }
+    } // END if/else
 
     // moveFile()
   } // END extractEVT
