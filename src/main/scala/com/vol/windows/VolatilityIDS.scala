@@ -1156,6 +1156,8 @@ object ExtraScans extends FileFun {
       Try(s"python vol.py -f $memFile --profile=$os timeliner --output=body --output-file=$timelinerName".!)
         .getOrElse(println("\n\nFailed to print timeliner.\n\n"))
     }
+    val registryDir = new File(cleanUp.destination + "/Dumps/Registry")
+    registryDir.mkdir()
 
     moveFile(timelinerName, cleanUp.destination + "/Dumps")
 
@@ -1169,7 +1171,7 @@ object ExtraScans extends FileFun {
       .getOrElse(println("\n\nFailed to dump registry.\n\n"))
     }
 
-    moveFile(regName, cleanUp.destination + "/Dumps")
+    moveFile(regName, cleanUp.destination + "/Dumps/Registry")
 
     // val dumpRegistry = "python vol.py --conf-file=user_config.txt dumpregistry --dump-dir ./registry_dump.txt"
 
