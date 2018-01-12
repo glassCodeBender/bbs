@@ -1159,7 +1159,7 @@ object ExtraScans extends FileFun {
 
     moveFile(timelinerName, cleanUp.destination + "/Dumps")
 
-    val regName = "./regdump_" + memFile.splitLast('.')(0) + ".body"
+    val regName = "regdump_" + memFile.splitLast('.')(0) + ".body"
 
     if(kdbg.nonEmpty){
       Try(s"python vol.py --conf-file=user_config.txt dumpregistry --dump-dir $regName".!)
@@ -1189,7 +1189,7 @@ object ExtraScans extends FileFun {
 
   private[this] def autorunsScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): Unit ={
     val auto = if(kdbg.nonEmpty){
-      Try("python vol.py --conf-file=user_config.txt autoruns -v").getOrElse("")
+      Try("python vol.py --conf-file=user_config.txt autoruns").getOrElse("")
     }else{
       Try(s"python vol.py -f $memFile --profile=$os autoruns -v").getOrElse("")
     }
