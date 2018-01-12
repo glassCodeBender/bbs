@@ -36,7 +36,7 @@ class CleanUp(dest: String) extends FileFun {
 
   private[vol] def writeAndMoveReport(outputFile: String, report: String) = {
     writeToFile(outputFile, report)
-    moveFile(report, outputFile)
+    moveFile(report, dest)
   }
 
   /** Move a data structure of files to Dumps directory. */
