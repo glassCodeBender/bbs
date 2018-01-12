@@ -215,6 +215,7 @@ object VolDiscoveryWindows extends VolParse with FileFun {
       Try(s"python vol.py -f $memFile --profile=$os mftparser --output=body --dump-dir=$mftDir --output-file=$mftFileName".! )
         .getOrElse(println("Failed to extract mft body file.\n"))
     }
+    moveFile(mftFileName, dump)
 
     return mftFileName
   } // END extractMFT()
@@ -237,6 +238,8 @@ object VolDiscoveryWindows extends VolParse with FileFun {
         Try(s"python vol.py -f $memFile --profile=$os dumpfiles --regex .evtx$$ --ignore-case --dump-dir $dump".!).getOrElse("")
       }
     }
+
+    // moveFile()
   } // END extractEVT
 
   /**
