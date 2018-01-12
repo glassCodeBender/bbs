@@ -1191,9 +1191,9 @@ object ExtraScans extends FileFun {
 
   private[this] def autorunsScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): Unit ={
     val auto = if(kdbg.nonEmpty){
-      Try("python vol.py --conf-file=user_config.txt autoruns").getOrElse("")
+      Try("python vol.py --conf-file=user_config.txt autoruns".!!.trim).getOrElse("")
     }else{
-      Try(s"python vol.py -f $memFile --profile=$os autoruns -v").getOrElse("")
+      Try(s"python vol.py -f $memFile --profile=$os autoruns -v".!!.trim).getOrElse("")
     }
 
     val outputFile = "autoruns_" + memFile.splitLast('.')(0) + ".txt"
@@ -1205,9 +1205,9 @@ object ExtraScans extends FileFun {
 
   private[this] def hollowfindScan(memFile: String, os: String, kdbg: String, cleanUp: CleanUp): Unit ={
     val hollow = if(kdbg.nonEmpty){
-      Try("python vol.py --conf-file=user_config.txt hollowfind").getOrElse("")
+      Try("python vol.py --conf-file=user_config.txt hollowfind".!!.trim).getOrElse("")
     }else{
-      Try(s"python vol.py -f $memFile --profile=$os hollowfind").getOrElse("")
+      Try(s"python vol.py -f $memFile --profile=$os hollowfind".!!.trim).getOrElse("")
     }
 
     val outputFile = "hollowfind_" + memFile.splitLast('.')(0) + ".txt"
