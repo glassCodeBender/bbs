@@ -54,4 +54,5 @@ To compile the Scala program, you need to go to the bbs-master directory, and th
 
 The jar will be located in bbs-master/target/scala-2.12/bigbrainsecurity.jar
 
+In order to run the program, bigbrainsecurity.jar must be located in the volatility directory. 
 
