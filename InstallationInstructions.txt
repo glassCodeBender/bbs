@@ -49,5 +49,9 @@ Open the volatility directory
 ~$ cd volatility 
 Place Any Memory Images in the Volatility Directory
 
+To compile the Scala program, you need to go to the bbs-master directory, and then run.
+~$ sbt assembly
+
+The jar will be located in bbs-master/target/scala-2.12/bigbrainsecurity.jar
 
 
